@@ -93,13 +93,22 @@ export default function Grades() {
 
   // Helper function to get student name from ID
   const getStudentName = (studentId: string) => {
-    return students?.find((s: any) => s.id === studentId)?.nama || studentId;
+    if (!students) return studentId;
+    const student = students.find((s: any) => s.id === studentId);
+    return student ? student.nama : studentId;
   };
 
   // Helper function to get subject name from ID
   const getSubjectName = (mapelId: string) => {
-    return subjects?.find((s: any) => s.id === mapelId)?.nama_mapel || mapelId;
+    if (!subjects) return mapelId;
+    const subject = subjects.find((s: any) => s.id === mapelId);
+    return subject ? subject.nama_mapel : mapelId;
   };
+
+  // Debug: Jika data loading, tampilkan loading state
+  if (!students || !subjects || !grades) {
+    return <div className="p-8 text-center text-muted-foreground">Memuat data...</div>;
+  }
 
   return (
     <div className="p-4 md:p-6 space-y-6 animate-in fade-in duration-500">

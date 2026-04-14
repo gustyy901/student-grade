@@ -7,17 +7,20 @@ import { Badge } from "@/components/ui/badge";
 import { FileText, GraduationCap } from "lucide-react";
 
 export default function GradeDetails() {
-  const { data: students } = useQuery({ queryKey: ["students"], queryFn: studentsAPI.getAll });
-  const { data: subjects } = useQuery({ queryKey: ["subjects"], queryFn: subjectsAPI.getAll });
-  const { data: grades } = useQuery({ queryKey: ["grades"], queryFn: gradesAPI.getAllTugas });
+  const { data: students, isLoading: isLoadingStudents } = useQuery({ queryKey: ["students"], queryFn: studentsAPI.getAll });
+  const { data: subjects, isLoading: isLoadingSubjects } = useQuery({ queryKey: ["subjects"], queryFn: subjectsAPI.getAll });
+  const { data: grades, isLoading: isLoadingGrades } = useQuery({ queryKey: ["grades"], queryFn: gradesAPI.getAllTugas });
+
+  const isLoading = isLoadingStudents || isLoadingSubjects || isLoadingGrades;
 
   // Group grades by student
   const studentGrades = useMemo(() => {
     if (!students || !grades || !subjects) return [];
     return students.map((student: any) => {
-      const studentGradesList = grades.filter((g: any) => g.student_id === student.id);
-      const avgScore = studentGradesList.length > 0
-        ? studentGradesList.reduce((sum: number, g: any) => sum + Number(g.nilai || 0), 0) / studentGradesList.length
+      const studentGradesList = grades.filter((g: any) => g.student_id === student.id) || [];
+      const nilaiArray = studentGradesList.map((g: any) => Number(g.nilai || 0)).filter(n => !isNaN(n));
+      const avgScore = nilaiArray.length > 0
+        ? nilaiArray.reduce((sum: number, val: number) => sum + val, 0) / nilaiArray.length
         : 0;
       return {
         ...student,
@@ -53,7 +56,13 @@ export default function GradeDetails() {
         <p className="text-sm md:text-base text-muted-foreground">Ringkasan nilai per siswa dan rata-rata</p>
       </div>
 
-      {studentGrades.length === 0 ? (
+      {isLoading ? (
+        <Card>
+          <CardContent className="text-center py-12 text-muted-foreground">
+            <p>Memuat data...</p>
+          </CardContent>
+        </Card>
+      ) : studentGrades.length === 0 ? (
         <Card>
           <CardContent className="text-center py-12 text-muted-foreground">
             <GraduationCap className="h-12 w-12 mx-auto mb-4 opacity-50" />
