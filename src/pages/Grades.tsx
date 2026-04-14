@@ -16,16 +16,20 @@ export default function Grades() {
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
   const [editingGrade, setEditingGrade] = useState<any>(null);
+  const [nilaiType, setNilaiType] = useState<"tugas" | "uts" | "uas">("tugas"); // Track jenis nilai
   const [formData, setFormData] = useState({ student_id: "", mapel_id: "", semester: "1", nilai: "" });
 
   const { data: students } = useQuery({ queryKey: ["students"], queryFn: studentsAPI.getAll });
   const { data: subjects } = useQuery({ queryKey: ["subjects"], queryFn: subjectsAPI.getAll });
-  const { data: grades, isLoading } = useQuery({ queryKey: ["grades"], queryFn: gradesAPI.getAllTugas });
+  
+  // Query based on nilaiType
+  const gradeQueryFn = nilaiType === "uts" ? gradesAPI.getAllUts : nilaiType === "uas" ? gradesAPI.getAllUas : gradesAPI.getAllTugas;
+  const { data: grades, isLoading } = useQuery({ queryKey: ["grades", nilaiType], queryFn: gradeQueryFn });
 
   const addMutation = useMutation({
-    mutationFn: gradesAPI.createTugas,
+    mutationFn: nilaiType === "uts" ? gradesAPI.createUts : nilaiType === "uas" ? gradesAPI.createUas : gradesAPI.createTugas,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["grades"] });
+      queryClient.invalidateQueries({ queryKey: ["grades", nilaiType] });
       toast.success("Nilai berhasil ditambahkan");
       handleClose();
     },
@@ -33,9 +37,12 @@ export default function Grades() {
   });
 
   const updateMutation = useMutation({
-    mutationFn: ({ id, data }: { id: string; data: any }) => gradesAPI.updateTugas(id, data),
+    mutationFn: ({ id, data }: { id: string; data: any }) => 
+      nilaiType === "uts" ? gradesAPI.updateUts(id, data) : 
+      nilaiType === "uas" ? gradesAPI.updateUas(id, data) : 
+      gradesAPI.updateTugas(id, data),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["grades"] });
+      queryClient.invalidateQueries({ queryKey: ["grades", nilaiType] });
       toast.success("Nilai berhasil diperbarui");
       handleClose();
     },
@@ -43,9 +50,12 @@ export default function Grades() {
   });
 
   const deleteMutation = useMutation({
-    mutationFn: gradesAPI.deleteTugas,
+    mutationFn: (id: string) => 
+      nilaiType === "uts" ? gradesAPI.deleteUts(id) : 
+      nilaiType === "uas" ? gradesAPI.deleteUas(id) : 
+      gradesAPI.deleteTugas(id),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["grades"] });
+      queryClient.invalidateQueries({ queryKey: ["grades", nilaiType] });
       toast.success("Nilai berhasil dihapus");
     },
     onError: (error: Error) => toast.error(error.message),
@@ -112,14 +122,40 @@ export default function Grades() {
 
   return (
     <div className="p-4 md:p-6 space-y-6 animate-in fade-in duration-500">
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-        <div>
-          <h2 className="text-2xl md:text-3xl font-bold text-foreground mb-2 flex items-center gap-2">
-            <ClipboardList className="h-6 w-6 md:h-8 md:w-8" />
-            Input Nilai
-          </h2>
-          <p className="text-sm md:text-base text-muted-foreground">Kelola nilai siswa per mata pelajaran</p>
+      <div>
+        <h2 className="text-2xl md:text-3xl font-bold text-foreground mb-2 flex items-center gap-2">
+          <ClipboardList className="h-6 w-6 md:h-8 md:w-8" />
+          Input Nilai
+        </h2>
+        <p className="text-sm md:text-base text-muted-foreground">Kelola nilai siswa per mata pelajaran</p>
+        
+        {/* Tabs untuk pilih jenis nilai */}
+        <div className="flex gap-2 mt-4">
+          <Button 
+            variant={nilaiType === "tugas" ? "default" : "outline"} 
+            onClick={() => setNilaiType("tugas")}
+            className="text-sm"
+          >
+            Nilai Tugas
+          </Button>
+          <Button 
+            variant={nilaiType === "uts" ? "default" : "outline"} 
+            onClick={() => setNilaiType("uts")}
+            className="text-sm"
+          >
+            Nilai UTS
+          </Button>
+          <Button 
+            variant={nilaiType === "uas" ? "default" : "outline"} 
+            onClick={() => setNilaiType("uas")}
+            className="text-sm"
+          >
+            Nilai UAS
+          </Button>
         </div>
+      </div>
+
+      <div className="flex justify-end">
         <Dialog open={open} onOpenChange={setOpen}>
           <DialogTrigger asChild>
             <Button disabled={!hasStudents || !hasSubjects} onClick={() => setEditingGrade(null)}>
@@ -198,7 +234,9 @@ export default function Grades() {
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-base md:text-lg">Daftar Nilai</CardTitle>
+          <CardTitle className="text-base md:text-lg">
+            Daftar Nilai {nilaiType === "uts" ? "UTS" : nilaiType === "uas" ? "UAS" : "Tugas"}
+          </CardTitle>
           <CardDescription className="text-xs md:text-sm">Total {grades?.length || 0} nilai</CardDescription>
         </CardHeader>
         <CardContent className="overflow-x-auto">
