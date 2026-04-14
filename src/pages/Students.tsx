@@ -68,10 +68,12 @@ export default function Students() {
       toast.error("Semua field wajib diisi"); 
       return; 
     }
+    // Convert display value to enum value (L or P)
+    const jenis_kelamin_enum = jenis_kelamin === "Laki-laki" ? "L" : "P";
     if (editingStudent) {
-      updateMutation.mutate({ id: editingStudent.id, data: { nis, nama, kelas, jenis_kelamin } });
+      updateMutation.mutate({ id: editingStudent.id, data: { nis, nama, kelas, jenis_kelamin: jenis_kelamin_enum } });
     } else {
-      addMutation.mutate({ nis, nama, kelas, jenis_kelamin });
+      addMutation.mutate({ nis, nama, kelas, jenis_kelamin: jenis_kelamin_enum });
     }
   };
 
@@ -80,7 +82,8 @@ export default function Students() {
     setNis(student.nis);
     setNama(student.nama);
     setKelas(student.kelas);
-    setJenis_kelamin(student.jenis_kelamin);
+    // Convert enum value (L/P) to display value
+    setJenis_kelamin(student.jenis_kelamin === "L" ? "Laki-laki" : "Perempuan");
     setOpen(true);
   };
 
@@ -187,7 +190,7 @@ export default function Students() {
                     <TableCell className="text-xs md:text-sm">{student.nis}</TableCell>
                     <TableCell className="font-medium text-xs md:text-sm">{student.nama}</TableCell>
                     <TableCell className="text-xs md:text-sm">{student.kelas}</TableCell>
-                    <TableCell className="text-xs md:text-sm">{student.jenis_kelamin}</TableCell>
+                    <TableCell className="text-xs md:text-sm">{student.jenis_kelamin === "L" ? "Laki-laki" : "Perempuan"}</TableCell>
                     <TableCell className="text-right">
                       <div className="flex justify-end gap-1 md:gap-2">
                         <Button size="icon" variant="outline" className="h-8 w-8" onClick={() => handleEdit(student)}>
