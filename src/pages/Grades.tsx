@@ -16,14 +16,14 @@ export default function Grades() {
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
   const [editingGrade, setEditingGrade] = useState<any>(null);
-  const [formData, setFormData] = useState({ student_id: "", subject_id: "", score: "" });
+  const [formData, setFormData] = useState({ student_id: "", mapel_id: "", semester: "1", nilai: "" });
 
   const { data: students } = useQuery({ queryKey: ["students"], queryFn: studentsAPI.getAll });
   const { data: subjects } = useQuery({ queryKey: ["subjects"], queryFn: subjectsAPI.getAll });
-  const { data: grades, isLoading } = useQuery({ queryKey: ["grades"], queryFn: gradesAPI.getAll });
+  const { data: grades, isLoading } = useQuery({ queryKey: ["grades"], queryFn: gradesAPI.getAllTugas });
 
   const addMutation = useMutation({
-    mutationFn: gradesAPI.create,
+    mutationFn: gradesAPI.createTugas,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["grades"] });
       toast.success("Nilai berhasil ditambahkan");
@@ -33,7 +33,7 @@ export default function Grades() {
   });
 
   const updateMutation = useMutation({
-    mutationFn: ({ id, data }: { id: number; data: any }) => gradesAPI.update(id, data),
+    mutationFn: ({ id, data }: { id: string; data: any }) => gradesAPI.updateTugas(id, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["grades"] });
       toast.success("Nilai berhasil diperbarui");
@@ -43,7 +43,7 @@ export default function Grades() {
   });
 
   const deleteMutation = useMutation({
-    mutationFn: gradesAPI.delete,
+    mutationFn: gradesAPI.deleteTugas,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["grades"] });
       toast.success("Nilai berhasil dihapus");
@@ -54,19 +54,20 @@ export default function Grades() {
   const handleClose = () => {
     setOpen(false);
     setEditingGrade(null);
-    setFormData({ student_id: "", subject_id: "", score: "" });
+    setFormData({ student_id: "", mapel_id: "", semester: "1", nilai: "" });
   };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.student_id) { toast.error("Pilih siswa"); return; }
-    if (!formData.subject_id) { toast.error("Pilih mata pelajaran"); return; }
-    if (!formData.score) { toast.error("Masukkan nilai"); return; }
+    if (!formData.mapel_id) { toast.error("Pilih mata pelajaran"); return; }
+    if (!formData.nilai) { toast.error("Masukkan nilai"); return; }
 
     const data = {
-      student_id: Number(formData.student_id),
-      subject_id: Number(formData.subject_id),
-      score: Number(formData.score),
+      student_id: formData.student_id,
+      mapel_id: formData.mapel_id,
+      semester: formData.semester,
+      nilai: Number(formData.nilai),
     };
 
     if (editingGrade) {
@@ -80,8 +81,9 @@ export default function Grades() {
     setEditingGrade(grade);
     setFormData({
       student_id: String(grade.student_id),
-      subject_id: String(grade.subject_id),
-      score: String(grade.score),
+      mapel_id: String(grade.mapel_id),
+      semester: String(grade.semester),
+      nilai: String(grade.nilai),
     });
     setOpen(true);
   };
@@ -118,26 +120,36 @@ export default function Grades() {
                   <SelectTrigger><SelectValue placeholder="Pilih siswa" /></SelectTrigger>
                   <SelectContent>
                     {students?.map((s: any) => (
-                      <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>
+                      <SelectItem key={s.id} value={String(s.id)}>{s.nama}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
               </div>
               <div>
                 <Label>Mata Pelajaran</Label>
-                <Select value={formData.subject_id} onValueChange={(v) => setFormData({ ...formData, subject_id: v })}>
+                <Select value={formData.mapel_id} onValueChange={(v) => setFormData({ ...formData, mapel_id: v })}>
                   <SelectTrigger><SelectValue placeholder="Pilih mata pelajaran" /></SelectTrigger>
                   <SelectContent>
                     {subjects?.map((s: any) => (
-                      <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>
+                      <SelectItem key={s.id} value={String(s.id)}>{s.nama_mapel}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
               </div>
               <div>
+                <Label>Semester</Label>
+                <Select value={formData.semester} onValueChange={(v) => setFormData({ ...formData, semester: v })}>
+                  <SelectTrigger><SelectValue placeholder="Pilih semester" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="1">Semester 1</SelectItem>
+                    <SelectItem value="2">Semester 2</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
                 <Label>Nilai (0-100)</Label>
-                <Input type="number" min="0" max="100" value={formData.score}
-                  onChange={(e) => setFormData({ ...formData, score: e.target.value })} required />
+                <Input type="number" min="0" max="100" value={formData.nilai}
+                  onChange={(e) => setFormData({ ...formData, nilai: e.target.value })} required />
               </div>
               <div className="flex justify-end gap-2">
                 <Button type="button" variant="outline" onClick={handleClose}>Batal</Button>
@@ -180,6 +192,7 @@ export default function Grades() {
                   <TableHead className="text-xs md:text-sm w-12">No</TableHead>
                   <TableHead className="text-xs md:text-sm">Siswa</TableHead>
                   <TableHead className="text-xs md:text-sm hidden sm:table-cell">Mata Pelajaran</TableHead>
+                  <TableHead className="text-xs md:text-sm">Semester</TableHead>
                   <TableHead className="text-right text-xs md:text-sm">Nilai</TableHead>
                   <TableHead className="text-right text-xs md:text-sm">Aksi</TableHead>
                 </TableRow>
@@ -188,9 +201,10 @@ export default function Grades() {
                 {grades.map((grade: any, index: number) => (
                   <TableRow key={grade.id}>
                     <TableCell className="text-xs md:text-sm">{index + 1}</TableCell>
-                    <TableCell className="font-medium text-xs md:text-sm">{grade.student_name}</TableCell>
-                    <TableCell className="text-xs md:text-sm hidden sm:table-cell">{grade.subject_name}</TableCell>
-                    <TableCell className="text-right font-semibold text-xs md:text-sm">{grade.score}</TableCell>
+                    <TableCell className="font-medium text-xs md:text-sm">{grade.student_id}</TableCell>
+                    <TableCell className="text-xs md:text-sm hidden sm:table-cell">{grade.mapel_id}</TableCell>
+                    <TableCell className="text-xs md:text-sm">{grade.semester}</TableCell>
+                    <TableCell className="text-right font-semibold text-xs md:text-sm">{grade.nilai}</TableCell>
                     <TableCell className="text-right">
                       <div className="flex justify-end gap-1 md:gap-2">
                         <Button size="icon" variant="outline" className="h-8 w-8" onClick={() => handleEdit(grade)}>
