@@ -14,7 +14,7 @@ export default function Subjects() {
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
   const [editingSubject, setEditingSubject] = useState<any>(null);
-  const [name, setName] = useState("");
+  const [nama_mapel, setNama_mapel] = useState("");
 
   const { data: subjects, isLoading } = useQuery({
     queryKey: ["subjects"],
@@ -32,7 +32,7 @@ export default function Subjects() {
   });
 
   const updateMutation = useMutation({
-    mutationFn: ({ id, data }: { id: number; data: { name: string } }) => subjectsAPI.update(id, data),
+    mutationFn: ({ id, data }: { id: string; data: { nama_mapel: string } }) => subjectsAPI.update(id, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["subjects"] });
       toast.success("Mata pelajaran berhasil diperbarui");
@@ -53,22 +53,22 @@ export default function Subjects() {
   const handleClose = () => {
     setOpen(false);
     setEditingSubject(null);
-    setName("");
+    setNama_mapel("");
   };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name.trim()) { toast.error("Nama wajib diisi"); return; }
+    if (!nama_mapel.trim()) { toast.error("Nama wajib diisi"); return; }
     if (editingSubject) {
-      updateMutation.mutate({ id: editingSubject.id, data: { name } });
+      updateMutation.mutate({ id: editingSubject.id, data: { nama_mapel } });
     } else {
-      addMutation.mutate({ name });
+      addMutation.mutate({ nama_mapel });
     }
   };
 
   const handleEdit = (subject: any) => {
     setEditingSubject(subject);
-    setName(subject.name);
+    setNama_mapel(subject.nama_mapel);
     setOpen(true);
   };
 
@@ -94,8 +94,8 @@ export default function Subjects() {
             </DialogHeader>
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
-                <Label htmlFor="name">Nama Mata Pelajaran</Label>
-                <Input id="name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Contoh: Matematika" required />
+                <Label htmlFor="nama_mapel">Nama Mata Pelajaran</Label>
+                <Input id="nama_mapel" value={nama_mapel} onChange={(e) => setNama_mapel(e.target.value)} placeholder="Contoh: Matematika" required />
               </div>
               <div className="flex gap-2 justify-end">
                 <Button type="button" variant="outline" onClick={handleClose}>Batal</Button>
@@ -121,7 +121,7 @@ export default function Subjects() {
                 subjects.map((subject: any, index: number) => (
                   <TableRow key={subject.id}>
                     <TableCell className="text-xs md:text-sm">{index + 1}</TableCell>
-                    <TableCell className="font-medium text-xs md:text-sm">{subject.name}</TableCell>
+                    <TableCell className="font-medium text-xs md:text-sm">{subject.nama_mapel}</TableCell>
                     <TableCell className="text-right">
                       <div className="flex gap-1 md:gap-2 justify-end">
                         <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => handleEdit(subject)}>

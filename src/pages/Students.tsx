@@ -14,7 +14,10 @@ export default function Students() {
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
   const [editingStudent, setEditingStudent] = useState<any>(null);
-  const [name, setName] = useState("");
+  const [nis, setNis] = useState("");
+  const [nama, setNama] = useState("");
+  const [kelas, setKelas] = useState("");
+  const [jenis_kelamin, setJenis_kelamin] = useState("Laki-laki");
 
   const { data: students, isLoading } = useQuery({
     queryKey: ["students"],
@@ -32,7 +35,7 @@ export default function Students() {
   });
 
   const updateMutation = useMutation({
-    mutationFn: ({ id, data }: { id: number; data: { name: string } }) => studentsAPI.update(id, data),
+    mutationFn: ({ id, data }: { id: string; data: { nis: string; nama: string; kelas: string; jenis_kelamin: string } }) => studentsAPI.update(id, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["students"] });
       toast.success("Siswa berhasil diperbarui");
@@ -53,22 +56,31 @@ export default function Students() {
   const handleClose = () => {
     setOpen(false);
     setEditingStudent(null);
-    setName("");
+    setNis("");
+    setNama("");
+    setKelas("");
+    setJenis_kelamin("Laki-laki");
   };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name.trim()) { toast.error("Nama wajib diisi"); return; }
+    if (!nis.trim() || !nama.trim() || !kelas.trim()) { 
+      toast.error("Semua field wajib diisi"); 
+      return; 
+    }
     if (editingStudent) {
-      updateMutation.mutate({ id: editingStudent.id, data: { name } });
+      updateMutation.mutate({ id: editingStudent.id, data: { nis, nama, kelas, jenis_kelamin } });
     } else {
-      addMutation.mutate({ name });
+      addMutation.mutate({ nis, nama, kelas, jenis_kelamin });
     }
   };
 
   const handleEdit = (student: any) => {
     setEditingStudent(student);
-    setName(student.name);
+    setNis(student.nis);
+    setNama(student.nama);
+    setKelas(student.kelas);
+    setJenis_kelamin(student.jenis_kelamin);
     setOpen(true);
   };
 
@@ -98,14 +110,46 @@ export default function Students() {
             </DialogHeader>
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
-                <Label htmlFor="name">Nama Siswa</Label>
+                <Label htmlFor="nis">NIS</Label>
                 <Input
-                  id="name"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
+                  id="nis"
+                  value={nis}
+                  onChange={(e) => setNis(e.target.value)}
+                  placeholder="Masukkan NIS siswa"
+                  required
+                />
+              </div>
+              <div>
+                <Label htmlFor="nama">Nama Siswa</Label>
+                <Input
+                  id="nama"
+                  value={nama}
+                  onChange={(e) => setNama(e.target.value)}
                   placeholder="Masukkan nama siswa"
                   required
                 />
+              </div>
+              <div>
+                <Label htmlFor="kelas">Kelas</Label>
+                <Input
+                  id="kelas"
+                  value={kelas}
+                  onChange={(e) => setKelas(e.target.value)}
+                  placeholder="Masukkan kelas (misal: X-A)"
+                  required
+                />
+              </div>
+              <div>
+                <Label htmlFor="jenis_kelamin">Jenis Kelamin</Label>
+                <select
+                  id="jenis_kelamin"
+                  value={jenis_kelamin}
+                  onChange={(e) => setJenis_kelamin(e.target.value)}
+                  className="w-full px-3 py-2 border border-input rounded-md"
+                >
+                  <option value="Laki-laki">Laki-laki</option>
+                  <option value="Perempuan">Perempuan</option>
+                </select>
               </div>
               <div className="flex justify-end gap-2">
                 <Button type="button" variant="outline" onClick={handleClose}>Batal</Button>
@@ -129,7 +173,10 @@ export default function Students() {
               <TableHeader>
                 <TableRow>
                   <TableHead className="text-xs md:text-sm w-12">No</TableHead>
+                  <TableHead className="text-xs md:text-sm">NIS</TableHead>
                   <TableHead className="text-xs md:text-sm">Nama Siswa</TableHead>
+                  <TableHead className="text-xs md:text-sm">Kelas</TableHead>
+                  <TableHead className="text-xs md:text-sm">Jenis Kelamin</TableHead>
                   <TableHead className="text-right text-xs md:text-sm">Aksi</TableHead>
                 </TableRow>
               </TableHeader>
@@ -137,7 +184,10 @@ export default function Students() {
                 {students.map((student: any, index: number) => (
                   <TableRow key={student.id}>
                     <TableCell className="text-xs md:text-sm">{index + 1}</TableCell>
-                    <TableCell className="font-medium text-xs md:text-sm">{student.name}</TableCell>
+                    <TableCell className="text-xs md:text-sm">{student.nis}</TableCell>
+                    <TableCell className="font-medium text-xs md:text-sm">{student.nama}</TableCell>
+                    <TableCell className="text-xs md:text-sm">{student.kelas}</TableCell>
+                    <TableCell className="text-xs md:text-sm">{student.jenis_kelamin}</TableCell>
                     <TableCell className="text-right">
                       <div className="flex justify-end gap-1 md:gap-2">
                         <Button size="icon" variant="outline" className="h-8 w-8" onClick={() => handleEdit(student)}>
