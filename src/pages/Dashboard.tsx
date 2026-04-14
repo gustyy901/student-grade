@@ -1,27 +1,70 @@
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { dashboardAPI } from "@/lib/api";
+import { studentsAPI, subjectsAPI, gradesAPI } from "@/lib/api";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Users, BookOpen, ClipboardList, TrendingUp, Sparkles, Award } from "lucide-react";
+import { Users, BookOpen, ClipboardList, TrendingUp, Award } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from "recharts";
 
-export default function Dashboard() {
-  const { data: stats } = useQuery({
-    queryKey: ["dashboard-stats"],
-    queryFn: dashboardAPI.getStats,
-  });
+const WEIGHTS = {
+  tugas: 0.25,
+  uts: 0.35,
+  uas: 0.40,
+};
 
-  const grades = stats?.grades || [];
+export default function Dashboard() {
+  const { data: students } = useQuery({ queryKey: ["students"], queryFn: studentsAPI.getAll });
+  const { data: subjects } = useQuery({ queryKey: ["subjects"], queryFn: subjectsAPI.getAll });
+  const { data: gradesTugas } = useQuery({ queryKey: ["grades", "tugas"], queryFn: gradesAPI.getAllTugas });
+  const { data: gradesUts } = useQuery({ queryKey: ["grades", "uts"], queryFn: gradesAPI.getAllUts });
+  const { data: gradesUas } = useQuery({ queryKey: ["grades", "uas"], queryFn: gradesAPI.getAllUas });
+
+  const allGrades = useMemo(() => {
+    return [...(gradesTugas || []), ...(gradesUts || []), ...(gradesUas || [])];
+  }, [gradesTugas, gradesUts, gradesUas]);
+
+  // Calculate stats
+  const stats = useMemo(() => {
+    if (!students) return { totalStudents: 0, totalSubjects: 0, totalGrades: 0, avgScore: 0 };
+    
+    const studentWeightedScores = (students || []).map((student: any) => {
+      const tugasList = (gradesTugas || []).filter((g: any) => g.student_id === student.id)
+        .map((g: any) => Number(g.nilai || 0));
+      const tugasAvg = tugasList.length > 0 ? tugasList.reduce((a, b) => a + b) / tugasList.length : 0;
+
+      const utsList = (gradesUts || []).filter((g: any) => g.student_id === student.id)
+        .map((g: any) => Number(g.nilai || 0));
+      const utsAvg = utsList.length > 0 ? utsList.reduce((a, b) => a + b) / utsList.length : 0;
+
+      const uasList = (gradesUas || []).filter((g: any) => g.student_id === student.id)
+        .map((g: any) => Number(g.nilai || 0));
+      const uasAvg = uasList.length > 0 ? uasList.reduce((a, b) => a + b) / utsList.length : 0;
+
+      if (tugasAvg > 0 || utsAvg > 0 || uasAvg > 0) {
+        return (tugasAvg * WEIGHTS.tugas) + (utsAvg * WEIGHTS.uts) + (uasAvg * WEIGHTS.uas);
+      }
+      return 0;
+    });
+
+    const validScores = studentWeightedScores.filter(s => s > 0);
+    const avgScore = validScores.length > 0 ? validScores.reduce((a, b) => a + b) / validScores.length : 0;
+
+    return {
+      totalStudents: students.length,
+      totalSubjects: subjects?.length || 0,
+      totalGrades: allGrades.length,
+      avgScore: avgScore.toFixed(1),
+    };
+  }, [students, subjects, gradesTugas, gradesUts, gradesUas, allGrades]);
 
   const gradeDistribution = useMemo(() => {
     const dist = { A: 0, B: 0, C: 0, D: 0, E: 0 };
-    grades.forEach((g: any) => {
-      const s = Number(g.score);
+    allGrades.forEach((g: any) => {
+      const s = Number(g.nilai || 0);
       if (s >= 90) dist.A++;
       else if (s >= 80) dist.B++;
       else if (s >= 70) dist.C++;
       else if (s >= 60) dist.D++;
-      else dist.E++;
+      else if (s > 0) dist.E++;
     });
     return [
       { grade: "A (90-100)", count: dist.A },
@@ -30,33 +73,33 @@ export default function Dashboard() {
       { grade: "D (60-69)", count: dist.D },
       { grade: "E (<60)", count: dist.E },
     ];
-  }, [grades]);
+  }, [allGrades]);
 
   const statCards = [
     {
       title: "Total Siswa",
-      value: stats?.totalStudents || 0,
+      value: stats.totalStudents,
       icon: Users,
       gradient: "from-blue-500 to-blue-600",
       bgGradient: "from-blue-500/10 to-blue-600/10",
     },
     {
       title: "Mata Pelajaran",
-      value: stats?.totalSubjects || 0,
+      value: stats.totalSubjects,
       icon: BookOpen,
       gradient: "from-emerald-500 to-emerald-600",
       bgGradient: "from-emerald-500/10 to-emerald-600/10",
     },
     {
       title: "Total Nilai",
-      value: stats?.totalGrades || 0,
+      value: stats.totalGrades,
       icon: ClipboardList,
       gradient: "from-amber-500 to-orange-500",
       bgGradient: "from-amber-500/10 to-orange-500/10",
     },
     {
       title: "Rata-rata Nilai",
-      value: Number(stats?.avgScore || 0).toFixed(1),
+      value: stats.avgScore,
       icon: TrendingUp,
       gradient: "from-purple-500 to-pink-500",
       bgGradient: "from-purple-500/10 to-pink-500/10",
@@ -70,11 +113,11 @@ export default function Dashboard() {
       <div className="page-header">
         <div className="flex items-center gap-3 mb-2">
           <div className="p-2 rounded-xl bg-gradient-to-br from-primary to-accent">
-            <Sparkles className="h-6 w-6 text-white" />
+            <Award className="h-6 w-6 text-white" />
           </div>
           <h2 className="page-title">Dashboard</h2>
         </div>
-        <p className="page-description">Ringkasan data dan analisis nilai siswa</p>
+        <p className="page-description">Ringkasan data dan analisis nilai siswa (Bobot: Tugas 25% | UTS 35% | UAS 40%)</p>
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
