@@ -37,7 +37,7 @@ export default function Dashboard() {
 
       const uasList = (gradesUas || []).filter((g: any) => g.student_id === student.id)
         .map((g: any) => Number(g.nilai || 0));
-      const uasAvg = uasList.length > 0 ? uasList.reduce((a, b) => a + b) / utsList.length : 0;
+      const uasAvg = uasList.length > 0 ? uasList.reduce((a, b) => a + b) / uasList.length : 0;
 
       if (tugasAvg > 0 || utsAvg > 0 || uasAvg > 0) {
         return (tugasAvg * WEIGHTS.tugas) + (utsAvg * WEIGHTS.uts) + (uasAvg * WEIGHTS.uas);
