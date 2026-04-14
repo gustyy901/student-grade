@@ -146,7 +146,7 @@ export default function Dashboard() {
         ))}
       </div>
 
-      <Card className="border-0 shadow-lg hover:shadow-2xl transition-all duration-500 rounded-3xl bg-gradient-to-br from-white to-gray-50 dark:from-slate-900 dark:to-slate-800 overflow-hidden">
+      <Card className="group border-0 shadow-lg hover:shadow-2xl transition-all duration-500 rounded-3xl bg-gradient-to-br from-white to-gray-50 dark:from-slate-900 dark:to-slate-800 overflow-hidden">
         <div className="absolute inset-0 bg-gradient-to-br from-cyan-500/5 to-blue-500/5 opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
         <CardHeader className="pb-6 border-b border-gray-200 dark:border-slate-800 relative z-10">
           <div className="flex items-start gap-4 mb-2">
