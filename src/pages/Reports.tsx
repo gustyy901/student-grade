@@ -1,27 +1,42 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { FileSpreadsheet, Loader2, Download, CheckCircle2 } from "lucide-react";
+import { FileSpreadsheet, Loader2, Download, CheckCircle2, AlertCircle } from "lucide-react";
 import { toast } from "sonner";
 import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { studentsAPI, subjectsAPI, gradesAPI } from "@/lib/api";
 import * as XLSX from "xlsx";
 
-const WEIGHTS = {
-  tugas: 0.25,
-  uts: 0.35,
-  uas: 0.40,
-};
+// Constants
+const WEIGHTS = { tugas: 0.25, uts: 0.35, uas: 0.40 };
 
-function getGrade(score: number): string {
+// Utility Functions
+const getGrade = (score: number): string => {
   if (score >= 90) return "A";
   if (score >= 80) return "B";
   if (score >= 70) return "C";
   if (score >= 60) return "D";
   if (score > 0) return "E";
   return "-";
-}
+};
+
+const calculateAverages = (grades: any[] | undefined) => ({
+  average: (grades?.length ?? 0) > 0 ? grades!.reduce((sum: number, g: any) => sum + Number(g.nilai), 0) / grades!.length : 0,
+  count: grades?.length ?? 0,
+});
+
+const createExcelWorkbook = (data: any, fileName: string) => {
+  const wb = XLSX.utils.book_new();
+  Object.entries(data).forEach(([sheetName, sheetData]: [string, any]) => {
+    if (sheetData.length > 0) {
+      const ws = XLSX.utils.json_to_sheet(sheetData);
+      ws["!cols"] = sheetData[0] ? Object.keys(sheetData[0]).map(() => ({ wch: 20 })) : [];
+      XLSX.utils.book_append_sheet(wb, ws, sheetName);
+    }
+  });
+  XLSX.writeFile(wb, fileName);
+};
 
 export default function Reports() {
   const [isExporting, setIsExporting] = useState(false);
@@ -241,135 +256,182 @@ export default function Reports() {
   ];
 
   return (
-    <div className="p-4 md:p-8 space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700">
-      <div className="page-header">
+    <div className="p-4 md:p-8 space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700 min-h-screen">
+      <div className="page-header mb-8">
         <div className="flex items-center gap-3 mb-2">
-          <div className="p-2 rounded-xl bg-gradient-to-br from-primary to-accent">
-            <Download className="h-6 w-6 text-white" />
+          <div className="p-2.5 rounded-2xl bg-gradient-to-br from-violet-500 to-purple-600 shadow-lg">
+            <FileSpreadsheet className="h-7 w-7 text-white" />
           </div>
-          <h2 className="page-title">Laporan & Export</h2>
+          <div>
+            <h2 className="page-title text-3xl font-bold">Laporan & Export</h2>
+            <p className="page-description text-base mt-1">Kelola dan ekspor data nilai siswa dalam format Excel</p>
+          </div>
         </div>
-        <p className="page-description">Export data nilai siswa dalam format Excel</p>
       </div>
 
-      <div className="grid gap-6 max-w-2xl">
+      <div className="grid gap-6 lg:grid-cols-2 max-w-5xl">
         {/* Export Semua Siswa */}
-        <Card className="group relative overflow-hidden rounded-2xl border-0 shadow-card hover:shadow-xl transition-all duration-500">
-          <div className="absolute inset-0 bg-gradient-to-br from-emerald-500/5 to-teal-500/5 opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
-          <CardHeader className="relative pb-4">
-            <div className="flex items-center gap-3 mb-2">
-              <div className="p-3 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-500 shadow-lg">
+        <Card className="group relative overflow-hidden rounded-3xl border-0 shadow-lg hover:shadow-2xl transition-all duration-500 bg-gradient-to-br from-white to-emerald-50/30 dark:from-slate-900 dark:to-emerald-950/20">
+          <div className="absolute top-0 right-0 -translate-y-1/2 translate-x-1/2 w-96 h-96 bg-gradient-to-br from-emerald-400/20 to-teal-300/10 rounded-full blur-3xl opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+          <CardHeader className="relative pb-6 border-b border-emerald-200/30 dark:border-emerald-900/30">
+            <div className="flex items-start gap-4 mb-2">
+              <div className="p-3 rounded-2xl bg-gradient-to-br from-emerald-500 to-teal-600 shadow-xl">
                 <FileSpreadsheet className="h-6 w-6 text-white" />
               </div>
-              <div>
-                <CardTitle className="text-xl font-bold">Export Semua Siswa</CardTitle>
-                <CardDescription className="text-sm mt-1">Download rekapitulasi data nilai semua siswa</CardDescription>
+              <div className="flex-1">
+                <CardTitle className="text-2xl font-bold bg-gradient-to-r from-emerald-600 to-teal-600 bg-clip-text text-transparent">Export Semua Siswa</CardTitle>
+                <CardDescription className="text-sm mt-2 text-gray-600 dark:text-gray-300">Unduh rekapitulasi lengkap nilai semua siswa dalam satu file Excel dengan 4 sheet</CardDescription>
               </div>
             </div>
           </CardHeader>
-          <CardContent className="relative space-y-5">
+          <CardContent className="relative space-y-5 pt-6">
             {(!students || students.length === 0) ? (
-              <div className="p-4 rounded-xl bg-muted/50 text-center text-muted-foreground">
-                <p>Belum ada data untuk diexport.</p>
-                <p className="text-sm mt-1">Tambahkan siswa dan nilai terlebih dahulu.</p>
+              <div className="p-6 rounded-2xl bg-amber-50/50 dark:bg-amber-950/20 border border-amber-200/50 dark:border-amber-900/30 text-center">
+                <AlertCircle className="h-10 w-10 text-amber-600 mx-auto mb-3" />
+                <p className="font-medium text-amber-900 dark:text-amber-200">Belum ada data untuk diexport</p>
+                <p className="text-sm text-amber-700 dark:text-amber-300 mt-1">Tambahkan siswa dan nilai terlebih dahulu untuk melihat opsi export</p>
               </div>
             ) : (
               <>
-                <div className="p-4 rounded-xl bg-gradient-to-br from-emerald-500/10 to-teal-500/10 border border-emerald-500/20">
-                  <p className="text-sm text-muted-foreground">
-                    Export {students?.length || 0} siswa, {gradesTugas?.length || 0} Tugas, {gradesUts?.length || 0} UTS, dan {gradesUas?.length || 0} UAS ke Excel.
-                  </p>
+                <div className="p-4 rounded-2xl bg-gradient-to-br from-emerald-500/10 to-teal-500/10 border border-emerald-300/40 dark:border-emerald-900/50 backdrop-blur-sm">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-xs font-semibold text-emerald-700 dark:text-emerald-300 uppercase tracking-wide">Data Siap Diexport</p>
+                      <p className="text-base font-semibold text-emerald-900 dark:text-emerald-100 mt-1">{students?.length || 0} Siswa • {(gradesTugas?.length || 0) + (gradesUts?.length || 0) + (gradesUas?.length || 0)} Total Nilai</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-xs text-emerald-600 dark:text-emerald-400 mb-1">Breakdown:</p>
+                      <p className="text-sm font-medium text-emerald-900 dark:text-emerald-100">📝 {gradesTugas?.length || 0} | 📋 {gradesUts?.length || 0} | 📄 {gradesUas?.length || 0}</p>
+                    </div>
+                  </div>
                 </div>
                 <Button
                   onClick={handleExportExcel}
-                  className="w-full h-12 rounded-xl font-semibold bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 shadow-lg"
+                  className="w-full h-12 rounded-xl font-semibold text-base bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 shadow-lg hover:shadow-xl transition-all duration-300 text-white border-0"
                   disabled={isExporting}
                 >
                   {isExporting ? (
-                    <><Loader2 className="h-5 w-5 mr-2 animate-spin" />Sedang Export...</>
+                    <><Loader2 className="h-5 w-5 mr-2 animate-spin" />Sedang Memproses...</>
                   ) : (
-                    <><FileSpreadsheet className="h-5 w-5 mr-2" />Export Semua</>
+                    <><FileSpreadsheet className="h-5 w-5 mr-2" />Unduh Semua Data ke Excel</>
                   )}
                 </Button>
               </>
             )}
-            <div className="pt-4 border-t border-border/50">
-              <p className="text-sm font-semibold text-foreground mb-3">File Excel berisi:</p>
-              <ul className="space-y-2">
-                {features.map((f, i) => (
-                  <li key={i} className="flex items-center gap-2 text-sm text-muted-foreground">
-                    <CheckCircle2 className="h-4 w-4 text-emerald-500 flex-shrink-0" />
-                    {f}
-                  </li>
-                ))}
+            <div className="pt-4 border-t border-gray-200 dark:border-gray-800">
+              <div className="flex items-center gap-2 mb-3">
+                <CheckCircle2 className="h-5 w-5 text-emerald-500" />
+                <p className="font-semibold text-sm text-foreground">Konten File Excel:</p>
+              </div>
+              <ul className="space-y-2.5 ml-7">
+                <li className="flex items-start gap-2 text-sm text-gray-600 dark:text-gray-400">
+                  <span className="text-emerald-500 font-bold">•</span>
+                  <span>Ringkasan nilai semua siswa dengan weighted average</span>
+                </li>
+                <li className="flex items-start gap-2 text-sm text-gray-600 dark:text-gray-400">
+                  <span className="text-emerald-500 font-bold">•</span>
+                  <span>Sheet terpisah untuk Detail Tugas, UTS, dan UAS</span>
+                </li>
+                <li className="flex items-start gap-2 text-sm text-gray-600 dark:text-gray-400">
+                  <span className="text-emerald-500 font-bold">•</span>
+                  <span>Grade otomatis berdasarkan skala A-E</span>
+                </li>
+                <li className="flex items-start gap-2 text-sm text-gray-600 dark:text-gray-400">
+                  <span className="text-emerald-500 font-bold">•</span>
+                  <span>Informasi lengkap: NIS, Kelas, Rata-rata per tipe</span>
+                </li>
               </ul>
             </div>
           </CardContent>
         </Card>
 
         {/* Export Satu Siswa */}
-        <Card className="group relative overflow-hidden rounded-2xl border-0 shadow-card hover:shadow-xl transition-all duration-500">
-          <div className="absolute inset-0 bg-gradient-to-br from-blue-500/5 to-cyan-500/5 opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
-          <CardHeader className="relative pb-4">
-            <div className="flex items-center gap-3 mb-2">
-              <div className="p-3 rounded-xl bg-gradient-to-br from-blue-500 to-cyan-500 shadow-lg">
+        <Card className="group relative overflow-hidden rounded-3xl border-0 shadow-lg hover:shadow-2xl transition-all duration-500 bg-gradient-to-br from-white to-blue-50/30 dark:from-slate-900 dark:to-blue-950/20">
+          <div className="absolute top-0 right-0 -translate-y-1/2 translate-x-1/2 w-96 h-96 bg-gradient-to-br from-blue-400/20 to-cyan-300/10 rounded-full blur-3xl opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+          <CardHeader className="relative pb-6 border-b border-blue-200/30 dark:border-blue-900/30">
+            <div className="flex items-start gap-4 mb-2">
+              <div className="p-3 rounded-2xl bg-gradient-to-br from-blue-500 to-cyan-600 shadow-xl">
                 <Download className="h-6 w-6 text-white" />
               </div>
-              <div>
-                <CardTitle className="text-xl font-bold">Export Satu Siswa</CardTitle>
-                <CardDescription className="text-sm mt-1">Download laporan nilai untuk satu siswa</CardDescription>
+              <div className="flex-1">
+                <CardTitle className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-cyan-600 bg-clip-text text-transparent">Export Satu Siswa</CardTitle>
+                <CardDescription className="text-sm mt-2 text-gray-600 dark:text-gray-300">Unduh laporan nilai lengkap untuk siswa tertentu dengan detail sempurna</CardDescription>
               </div>
             </div>
           </CardHeader>
-          <CardContent className="relative space-y-5">
+          <CardContent className="relative space-y-5 pt-6">
             {(!students || students.length === 0) ? (
-              <div className="p-4 rounded-xl bg-muted/50 text-center text-muted-foreground">
-                <p>Belum ada siswa untuk diexport.</p>
+              <div className="p-6 rounded-2xl bg-amber-50/50 dark:bg-amber-950/20 border border-amber-200/50 dark:border-amber-900/30 text-center">
+                <AlertCircle className="h-10 w-10 text-amber-600 mx-auto mb-3" />
+                <p className="font-medium text-amber-900 dark:text-amber-200">Belum ada siswa tersedia</p>
+                <p className="text-sm text-amber-700 dark:text-amber-300 mt-1">Tambahkan siswa terlebih dahulu untuk menggunakan fitur ini</p>
               </div>
             ) : (
               <>
-                <div className="space-y-3">
-                  <label className="text-sm font-medium text-foreground">Pilih Siswa</label>
-                  <Select value={selectedStudentId || ""} onValueChange={setSelectedStudentId}>
-                    <SelectTrigger className="h-11 rounded-xl border-border/50">
-                      <SelectValue placeholder="Pilih siswa..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {students?.map((student: any) => (
-                        <SelectItem key={student.id} value={student.id}>
-                          {student.nama} ({student.nis})
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                <div className="space-y-4">
+                  <div>
+                    <label className="text-sm font-semibold text-foreground mb-3 block">📌 Pilih Siswa</label>
+                    <Select value={selectedStudentId || ""} onValueChange={setSelectedStudentId}>
+                      <SelectTrigger className="h-12 rounded-2xl border border-blue-200/50 dark:border-blue-900/50 bg-white dark:bg-slate-900 hover:border-blue-400/50 transition-colors">
+                        <SelectValue placeholder="Tekan untuk memilih siswa..." />
+                      </SelectTrigger>
+                      <SelectContent className="rounded-2xl">
+                        {students?.map((student: any) => (
+                          <SelectItem key={student.id} value={student.id} className="cursor-pointer">
+                            <div className="flex items-center gap-2">
+                              <span className="font-medium">{student.nama}</span>
+                              <span className="text-gray-500">({student.nis})</span>
+                              {student.kelas && <span className="text-xs bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 px-2 py-0.5 rounded-full">{student.kelas}</span>}
+                            </div>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {selectedStudentId && students && (
+                    <div className="p-4 rounded-2xl bg-gradient-to-br from-blue-500/10 to-cyan-500/10 border border-blue-300/40 dark:border-blue-900/50">
+                      <p className="text-xs font-semibold text-blue-700 dark:text-blue-300 uppercase tracking-wide">Siswa Dipilih</p>
+                      <p className="font-semibold text-blue-900 dark:text-blue-100 mt-1">{students.find((s: any) => s.id === selectedStudentId)?.nama}</p>
+                      <p className="text-xs text-blue-700 dark:text-blue-400 mt-1">NIS: {students.find((s: any) => s.id === selectedStudentId)?.nis} • Kelas: {students.find((s: any) => s.id === selectedStudentId)?.kelas}</p>
+                    </div>
+                  )}
                 </div>
+
                 <Button
                   onClick={handleExportSingleStudent}
-                  className="w-full h-12 rounded-xl font-semibold bg-gradient-to-r from-blue-500 to-cyan-500 hover:from-blue-600 hover:to-cyan-600 shadow-lg"
+                  className="w-full h-12 rounded-xl font-semibold text-base bg-gradient-to-r from-blue-500 to-cyan-500 hover:from-blue-600 hover:to-cyan-600 shadow-lg hover:shadow-xl transition-all duration-300 text-white border-0"
                   disabled={isExporting || !selectedStudentId}
                 >
                   {isExporting ? (
-                    <><Loader2 className="h-5 w-5 mr-2 animate-spin" />Sedang Export...</>
+                    <><Loader2 className="h-5 w-5 mr-2 animate-spin" />Sedang Memproses...</>
                   ) : (
-                    <><Download className="h-5 w-5 mr-2" />Export Laporan Siswa</>
+                    <><Download className="h-5 w-5 mr-2" />Unduh Laporan Siswa</>
                   )}
                 </Button>
               </>
             )}
-            <div className="pt-4 border-t border-border/50">
-              <p className="text-sm font-semibold text-foreground mb-3">File akan berisi:</p>
-              <ul className="space-y-2">
-                <li className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <CheckCircle2 className="h-4 w-4 text-blue-500 flex-shrink-0" />
-                  Ringkasan nilai untuk 1 siswa
+            <div className="pt-4 border-t border-gray-200 dark:border-gray-800">
+              <div className="flex items-center gap-2 mb-3">
+                <CheckCircle2 className="h-5 w-5 text-blue-500" />
+                <p className="font-semibold text-sm text-foreground">File berisi informasi:</p>
+              </div>
+              <ul className="space-y-2.5 ml-7">
+                <li className="flex items-start gap-2 text-sm text-gray-600 dark:text-gray-400">
+                  <span className="text-blue-500 font-bold">•</span>
+                  <span>Ringkasan lengkap untuk 1 siswa saja</span>
                 </li>
-                <li className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <CheckCircle2 className="h-4 w-4 text-blue-500 flex-shrink-0" />
-                  Detail nilai Tugas, UTS, UAS
+                <li className="flex items-start gap-2 text-sm text-gray-600 dark:text-gray-400">
+                  <span className="text-blue-500 font-bold">•</span>
+                  <span>Detail nilai Tugas, UTS, dan UAS terpisah</span>
                 </li>
-                <li className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <CheckCircle2 className="h-4 w-4 text-blue-500 flex-shrink-0" />
-                  Total nilai akhir & grade
+                <li className="flex items-start gap-2 text-sm text-gray-600 dark:text-gray-400">
+                  <span className="text-blue-500 font-bold">•</span>
+                  <span>Total nilai akhir dengan grade letter</span>
+                </li>
+                <li className="flex items-start gap-2 text-sm text-gray-600 dark:text-gray-400">
+                  <span className="text-blue-500 font-bold">•</span>
+                  <span>Format: {selectedStudentId && students ? `${students.find((s: any) => s.id === selectedStudentId)?.nama}_Laporan_Nilai.xlsx` : "NamaSiswa_Laporan_Nilai.xlsx"}</span>
                 </li>
               </ul>
             </div>
