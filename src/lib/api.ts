@@ -43,14 +43,42 @@ export const subjectsAPI = {
   delete: (id: string) => fetchAPI(`/mapel/${id}`, { method: 'DELETE' }),
 };
 
-// Grades API
+// Grades API - Assignment (Tugas)
 export const gradesAPI = {
-  getAll: () => fetchAPI('/nilai'),
+  // Get all tugas
+  getAllTugas: () => fetchAPI('/nilai/tugas'),
+  createTugas: (data: { student_id: string; mapel_id: string; semester: string; nilai: number }) =>
+    fetchAPI('/nilai/tugas', { method: 'POST', body: JSON.stringify(data) }),
+  updateTugas: (id: string, data: { student_id: string; mapel_id: string; semester: string; nilai: number }) =>
+    fetchAPI(`/nilai/tugas/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteTugas: (id: string) => fetchAPI(`/nilai/tugas/${id}`, { method: 'DELETE' }),
+
+  // Get all UTS (Midterm)
+  getAllUts: () => fetchAPI('/nilai/uts'),
+  createUts: (data: { student_id: string; mapel_id: string; semester: string; nilai: number }) =>
+    fetchAPI('/nilai/uts', { method: 'POST', body: JSON.stringify(data) }),
+  updateUts: (id: string, data: { student_id: string; mapel_id: string; semester: string; nilai: number }) =>
+    fetchAPI(`/nilai/uts/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteUts: (id: string) => fetchAPI(`/nilai/uts/${id}`, { method: 'DELETE' }),
+
+  // Get all UAS (Final)
+  getAllUas: () => fetchAPI('/nilai/uas'),
+  createUas: (data: { student_id: string; mapel_id: string; semester: string; nilai: number }) =>
+    fetchAPI('/nilai/uas', { method: 'POST', body: JSON.stringify(data) }),
+  updateUas: (id: string, data: { student_id: string; mapel_id: string; semester: string; nilai: number }) =>
+    fetchAPI(`/nilai/uas/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteUas: (id: string) => fetchAPI(`/nilai/uas/${id}`, { method: 'DELETE' }),
+
+  // Get detail nilai
+  getDetail: () => fetchAPI('/nilai/detail'),
+  
+  // Legacy fallback (for compatibility)
+  getAll: () => fetchAPI('/nilai/tugas'),
   create: (data: { student_id: string; mapel_id: string; semester: string; nilai: number }) =>
-    fetchAPI('/nilai', { method: 'POST', body: JSON.stringify(data) }),
+    fetchAPI('/nilai/tugas', { method: 'POST', body: JSON.stringify(data) }),
   update: (id: string, data: { student_id: string; mapel_id: string; semester: string; nilai: number }) =>
-    fetchAPI(`/nilai/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
-  delete: (id: string) => fetchAPI(`/nilai/${id}`, { method: 'DELETE' }),
+    fetchAPI(`/nilai/tugas/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  delete: (id: string) => fetchAPI(`/nilai/tugas/${id}`, { method: 'DELETE' }),
 };
 
 // Dashboard API
