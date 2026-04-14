@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { studentsAPI, subjectsAPI, gradesAPI } from "@/lib/api";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Users, BookOpen, ClipboardList, TrendingUp, Award } from "lucide-react";
+import { Users, BookOpen, ClipboardList, TrendingUp, Award, Target } from \"lucide-react\";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from "recharts";
 
 const WEIGHTS = {
@@ -109,78 +109,97 @@ export default function Dashboard() {
   const colors = ["#22c55e", "#3b82f6", "#eab308", "#f97316", "#ef4444"];
 
   return (
-    <div className="p-4 md:p-8 space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700">
-      <div className="page-header">
-        <div className="flex items-center gap-3 mb-2">
-          <div className="p-2 rounded-xl bg-gradient-to-br from-primary to-accent">
-            <Award className="h-6 w-6 text-white" />
+    <div className="p-4 md:p-8 space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700 min-h-screen">
+      <div className="page-header mb-10">
+        <div className="flex items-center gap-4 mb-3">
+          <div className="p-3 rounded-2xl bg-gradient-to-br from-indigo-500 to-purple-600 shadow-xl">
+            <Target className="h-7 w-7 text-white" />
           </div>
-          <h2 className="page-title">Dashboard</h2>
+          <div>
+            <h2 className="page-title text-4xl font-bold bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent">Dashboard</h2>
+            <p className="page-description text-base mt-2 text-gray-600 dark:text-gray-300">Ringkasan lengkap data siswa, mata pelajaran, dan analisis nilai dengan weighted average (Tugas 25% 📝 | UTS 35% 📋 | UAS 40% 📄)</p>
+          </div>
         </div>
-        <p className="page-description">Ringkasan data dan analisis nilai siswa (Bobot: Tugas 25% | UTS 35% | UAS 40%)</p>
       </div>
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5 md:gap-6">
         {statCards.map((stat, index) => (
           <div
             key={stat.title}
-            className="group relative overflow-hidden rounded-2xl bg-card p-5 md:p-6 shadow-card border border-border/50 transition-all duration-500 hover:shadow-xl hover:-translate-y-2"
+            className="group relative overflow-hidden rounded-3xl bg-gradient-to-br from-white to-gray-50 dark:from-slate-900 dark:to-slate-800 p-6 shadow-lg hover:shadow-2xl border border-gray-100 dark:border-slate-800 transition-all duration-500 hover:-translate-y-1"
             style={{ animationDelay: `${index * 100}ms` }}
           >
-            <div className={`absolute inset-0 bg-gradient-to-br ${stat.bgGradient} opacity-0 group-hover:opacity-100 transition-opacity duration-500`} />
+            <div className={`absolute top-0 right-0 -translate-y-1/2 translate-x-1/2 w-40 h-40 bg-gradient-to-br ${stat.bgGradient} rounded-full blur-3xl opacity-0 group-hover:opacity-60 transition-opacity duration-500`} />
+            <div className={`absolute inset-0 bg-gradient-to-br ${stat.bgGradient} opacity-0 group-hover:opacity-5 transition-opacity duration-500`} />
             <div className="relative z-10">
-              <div className="flex items-center justify-between mb-4">
-                <p className="text-xs md:text-sm font-medium text-muted-foreground">{stat.title}</p>
-                <div className={`p-2.5 rounded-xl bg-gradient-to-br ${stat.gradient} shadow-lg`}>
-                  <stat.icon className="h-4 w-4 md:h-5 md:w-5 text-white" />
+              <div className="flex items-center justify-between mb-5">
+                <span className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-widest">{stat.title}</span>
+                <div className={`p-3 rounded-2xl bg-gradient-to-br ${stat.gradient} shadow-xl`}>
+                  <stat.icon className="h-6 w-6 text-white" />
                 </div>
               </div>
-              <p className="text-2xl md:text-3xl font-bold text-foreground">{stat.value}</p>
+              <div>
+                <p className={`text-4xl md:text-5xl font-black bg-gradient-to-br ${stat.gradient} bg-clip-text text-transparent`}>{stat.value}</p>
+              </div>
             </div>
-            <div className={`absolute -bottom-4 -right-4 w-24 h-24 rounded-full bg-gradient-to-br ${stat.gradient} opacity-5 group-hover:opacity-10 transition-opacity duration-500`} />
           </div>
         ))}
       </div>
 
-      <Card className="border-0 shadow-card hover:shadow-xl transition-all duration-500">
-        <CardHeader className="pb-2">
-          <div className="flex items-center gap-3">
-            <div className="p-2 rounded-xl bg-gradient-to-br from-emerald-500/10 to-emerald-600/10">
-              <Award className="h-5 w-5 text-emerald-600" />
+      <Card className="border-0 shadow-lg hover:shadow-2xl transition-all duration-500 rounded-3xl bg-gradient-to-br from-white to-gray-50 dark:from-slate-900 dark:to-slate-800 overflow-hidden">
+        <div className="absolute inset-0 bg-gradient-to-br from-cyan-500/5 to-blue-500/5 opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+        <CardHeader className="pb-6 border-b border-gray-200 dark:border-slate-800 relative z-10">
+          <div className="flex items-start gap-4 mb-2">
+            <div className="p-3 rounded-2xl bg-gradient-to-br from-cyan-500/20 to-blue-500/20 dark:from-cyan-900/40 dark:to-blue-900/40">
+              <Target className="h-6 w-6 text-cyan-600 dark:text-cyan-400" />
             </div>
-            <div>
-              <CardTitle className="text-lg md:text-xl font-bold">Distribusi Nilai</CardTitle>
-              <CardDescription className="text-sm">Jumlah nilai berdasarkan grade</CardDescription>
+            <div className="flex-1">
+              <CardTitle className="text-2xl font-bold bg-gradient-to-r from-cyan-600 to-blue-600 bg-clip-text text-transparent">Distribusi Nilai Siswa</CardTitle>
+              <CardDescription className="text-base mt-2 text-gray-600 dark:text-gray-300">Visualisasi jumlah nilai berdasarkan grade (A-E) dengan skala penilaian standar</CardDescription>
             </div>
           </div>
         </CardHeader>
-        <CardContent className="pt-4">
+        <CardContent className="pt-8 relative z-10">
           {gradeDistribution.some(d => d.count > 0) ? (
-            <ResponsiveContainer width="100%" height={300}>
-              <BarChart data={gradeDistribution} margin={{ top: 20, right: 20, left: 0, bottom: 5 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.5} />
-                <XAxis dataKey="grade" tick={{ fontSize: 12, fill: 'hsl(var(--foreground))' }} />
-                <YAxis allowDecimals={false} tick={{ fontSize: 12, fill: 'hsl(var(--muted-foreground))' }} />
-                <Tooltip
-                  formatter={(value) => [`${value} nilai`, "Jumlah"]}
-                  contentStyle={{
-                    backgroundColor: 'hsl(var(--card))',
-                    border: '1px solid hsl(var(--border))',
-                    borderRadius: '12px',
-                  }}
-                />
-                <Bar dataKey="count" name="Jumlah" radius={[12, 12, 0, 0]}>
-                  {gradeDistribution.map((_, index) => (
-                    <Cell key={index} fill={colors[index]} />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
+            <div className="space-y-6">
+              <ResponsiveContainer width="100%" height={320}>
+                <BarChart data={gradeDistribution} margin={{ top: 30, right: 30, left: 10, bottom: 20 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.2} />
+                  <XAxis dataKey="grade" tick={{ fontSize: 13, fill: 'hsl(var(--foreground))', fontWeight: 500 }} />
+                  <YAxis allowDecimals={false} tick={{ fontSize: 13, fill: 'hsl(var(--muted-foreground))' }} />
+                  <Tooltip
+                    formatter={(value) => [`${value} siswa`, "Total"]}
+                    labelFormatter={(label) => `Grade: ${label}`}
+                    contentStyle={{
+                      backgroundColor: 'hsl(var(--card))',
+                      border: '2px solid hsl(var(--border))',
+                      borderRadius: '16px',
+                      boxShadow: '0 10px 25px rgba(0, 0, 0, 0.1)',
+                    }}
+                    cursor={{ fill: 'rgba(100, 200, 255, 0.1)' }}
+                  />
+                  <Bar dataKey="count" name="Jumlah" radius={[16, 16, 0, 0]} animationDuration={800}>
+                    {gradeDistribution.map((_, index) => (
+                      <Cell key={index} fill={colors[index]} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+              <div className="grid grid-cols-5 gap-2 mt-4 p-4 rounded-2xl bg-gray-50 dark:bg-slate-800/50">
+                {gradeDistribution.map((item, idx) => (
+                  <div key={idx} className="text-center p-3 rounded-xl bg-white dark:bg-slate-700/50">
+                    <p className="font-bold text-lg" style={{ color: colors[idx] }}>{item.grade.charAt(0)}</p>
+                    <p className="text-2xl font-bold text-gray-900 dark:text-white mt-1">{item.count}</p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">siswa</p>
+                  </div>
+                ))}
+              </div>
+            </div>
           ) : (
-            <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
-              <Award className="h-12 w-12 mb-4 opacity-50" />
-              <p className="text-lg font-medium">Belum ada data nilai</p>
-              <p className="text-sm mt-1">Tambahkan nilai untuk melihat distribusi.</p>
+            <div className="flex flex-col items-center justify-center py-20 text-gray-400">
+              <Target className="h-16 w-16 mb-4 opacity-30" />
+              <p className="text-xl font-semibold text-gray-600 dark:text-gray-300">Belum ada data nilai</p>
+              <p className="text-base text-gray-500 dark:text-gray-400 mt-2">Mulai tambahkan nilai siswa untuk melihat distribusi grade di sini</p>
             </div>
           )}
         </CardContent>
