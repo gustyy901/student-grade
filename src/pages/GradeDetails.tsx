@@ -9,7 +9,7 @@ import { FileText, GraduationCap } from "lucide-react";
 export default function GradeDetails() {
   const { data: students } = useQuery({ queryKey: ["students"], queryFn: studentsAPI.getAll });
   const { data: subjects } = useQuery({ queryKey: ["subjects"], queryFn: subjectsAPI.getAll });
-  const { data: grades } = useQuery({ queryKey: ["grades"], queryFn: gradesAPI.getAll });
+  const { data: grades } = useQuery({ queryKey: ["grades"], queryFn: gradesAPI.getAllTugas });
 
   // Group grades by student
   const studentGrades = useMemo(() => {
@@ -17,12 +17,12 @@ export default function GradeDetails() {
     return students.map((student: any) => {
       const studentGradesList = grades.filter((g: any) => g.student_id === student.id);
       const avgScore = studentGradesList.length > 0
-        ? studentGradesList.reduce((sum: number, g: any) => sum + Number(g.score), 0) / studentGradesList.length
+        ? studentGradesList.reduce((sum: number, g: any) => sum + Number(g.nilai || 0), 0) / studentGradesList.length
         : 0;
       return {
         ...student,
         grades: studentGradesList,
-        avgScore,
+        avgScore: isNaN(avgScore) ? 0 : avgScore,
         totalGrades: studentGradesList.length,
       };
     });
@@ -67,7 +67,7 @@ export default function GradeDetails() {
             <CardHeader>
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                 <div>
-                  <CardTitle className="text-lg">{student.name}</CardTitle>
+                  <CardTitle className="text-lg">{student.nama}</CardTitle>
                   <CardDescription>{student.totalGrades} nilai tercatat</CardDescription>
                 </div>
                 {student.totalGrades > 0 && (
@@ -92,18 +92,21 @@ export default function GradeDetails() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {student.grades.map((grade: any, idx: number) => (
-                      <TableRow key={grade.id}>
-                        <TableCell className="text-xs md:text-sm">{idx + 1}</TableCell>
-                        <TableCell className="text-xs md:text-sm">{grade.subject_name}</TableCell>
-                        <TableCell className="text-right font-semibold text-xs md:text-sm">{grade.score}</TableCell>
-                        <TableCell className="text-right">
-                          <Badge variant={getGradeBadge(grade.score)} className="text-xs">
-                            {getGradeLabel(grade.score)}
-                          </Badge>
-                        </TableCell>
-                      </TableRow>
-                    ))}
+                    {student.grades.map((grade: any, idx: number) => {
+                      const subject = subjects?.find((s: any) => s.id === grade.mapel_id);
+                      return (
+                        <TableRow key={grade.id}>
+                          <TableCell className="text-xs md:text-sm">{idx + 1}</TableCell>
+                          <TableCell className="text-xs md:text-sm">{subject?.nama_mapel || grade.mapel_id}</TableCell>
+                          <TableCell className="text-right font-semibold text-xs md:text-sm">{grade.nilai}</TableCell>
+                          <TableCell className="text-right">
+                            <Badge variant={getGradeBadge(grade.nilai)} className="text-xs">
+                              {getGradeLabel(grade.nilai)}
+                            </Badge>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
                   </TableBody>
                 </Table>
               ) : (

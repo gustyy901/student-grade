@@ -91,6 +91,16 @@ export default function Grades() {
   const hasStudents = students && students.length > 0;
   const hasSubjects = subjects && subjects.length > 0;
 
+  // Helper function to get student name from ID
+  const getStudentName = (studentId: string) => {
+    return students?.find((s: any) => s.id === studentId)?.nama || studentId;
+  };
+
+  // Helper function to get subject name from ID
+  const getSubjectName = (mapelId: string) => {
+    return subjects?.find((s: any) => s.id === mapelId)?.nama_mapel || mapelId;
+  };
+
   return (
     <div className="p-4 md:p-6 space-y-6 animate-in fade-in duration-500">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
@@ -201,8 +211,8 @@ export default function Grades() {
                 {grades.map((grade: any, index: number) => (
                   <TableRow key={grade.id}>
                     <TableCell className="text-xs md:text-sm">{index + 1}</TableCell>
-                    <TableCell className="font-medium text-xs md:text-sm">{grade.student_id}</TableCell>
-                    <TableCell className="text-xs md:text-sm hidden sm:table-cell">{grade.mapel_id}</TableCell>
+                    <TableCell className="font-medium text-xs md:text-sm">{getStudentName(grade.student_id)}</TableCell>
+                    <TableCell className="text-xs md:text-sm hidden sm:table-cell">{getSubjectName(grade.mapel_id)}</TableCell>
                     <TableCell className="text-xs md:text-sm">{grade.semester}</TableCell>
                     <TableCell className="text-right font-semibold text-xs md:text-sm">{grade.nilai}</TableCell>
                     <TableCell className="text-right">
