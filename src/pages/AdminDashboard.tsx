@@ -81,7 +81,7 @@ export default function AdminDashboard() {
     }
     if (searchStudent.trim()) {
       filtered = filtered.filter((s: any) =>
-        s.name.toLowerCase().includes(searchStudent.toLowerCase())
+        s.nama.toLowerCase().includes(searchStudent.toLowerCase())
       );
     }
     return filtered;
@@ -308,7 +308,7 @@ export default function AdminDashboard() {
                     return (
                       <TableRow key={student.id} className="border-border/50 hover:bg-muted/40">
                         <TableCell className="text-muted-foreground">{idx + 1}</TableCell>
-                        <TableCell className="font-medium">{student.name}</TableCell>
+                        <TableCell className="font-medium">{student.nama}</TableCell>
                         <TableCell>
                           <Badge variant="outline">{teacher?.name || "Unknown"}</Badge>
                         </TableCell>
@@ -358,7 +358,7 @@ export default function AdminDashboard() {
               <TableBody>
                 {allGrades.length > 0 ? (
                   allGrades.map((grade: any, idx: number) => {
-                    const scoreNum = Number(grade.score);
+                    const scoreNum = Number(grade.nilai);
                     let gradeLabel = "E";
                     let badgeVariant: "default" | "secondary" | "destructive" | "outline" = "destructive";
 
@@ -384,7 +384,7 @@ export default function AdminDashboard() {
                         <TableCell>
                           <Badge variant="outline">{grade.teacher_name || "-"}</Badge>
                         </TableCell>
-                        <TableCell className="font-semibold">{grade.score}</TableCell>
+                        <TableCell className="font-semibold">{grade.nilai}</TableCell>
                         <TableCell>
                           <Badge variant={badgeVariant}>{gradeLabel}</Badge>
                         </TableCell>

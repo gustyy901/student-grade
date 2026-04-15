@@ -1,12 +1,16 @@
 const express = require('express');
 const mysql = require('mysql2/promise');
 const cors = require('cors');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
 require('dotenv').config();
 
 const app = express();
 const PORT = process.env.PORT || 3001;
+const DB_NAME = process.env.DB_NAME || 'student_grade_hub';
+const JWT_SECRET = process.env.JWT_SECRET || 'student_grade_hub_secret_key_2024';
 
-// Middleware
 app.use(cors());
 app.use(express.json());
 
@@ -15,104 +19,166 @@ const pool = mysql.createPool({
   host: process.env.DB_HOST || 'localhost',
   user: process.env.DB_USER || 'root',
   password: process.env.DB_PASSWORD || '',
-  database: process.env.DB_NAME || 'rekap_nilai_db',
+  database: DB_NAME,
   waitForConnections: true,
   connectionLimit: 10,
   queueLimit: 0
 });
 
-// Simple token store (in production, use Redis or DB sessions)
-const sessions = new Map();
-
-function generateToken() {
-  return require('crypto').randomBytes(32).toString('hex');
+function buildUserPayload(user) {
+  return {
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    role: user.role || 'teacher',
+  };
 }
 
+// JWT Auth Middleware
 function authMiddleware(req, res, next) {
   const token = req.headers.authorization?.replace('Bearer ', '');
-  if (!token || !sessions.has(token)) {
-    return res.status(401).json({ error: 'Unauthorized' });
+  if (!token) return res.status(401).json({ error: 'Unauthorized' });
+
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET);
+    req.user = decoded;
+    next();
+  } catch {
+    return res.status(401).json({ error: 'Token tidak valid' });
   }
-  req.user = sessions.get(token);
+}
+
+function adminOnly(req, res, next) {
+  if (req.user?.role !== 'admin') {
+    return res.status(403).json({ error: 'Akses admin diperlukan' });
+  }
   next();
 }
 
-// Initialize database and tables
+async function ensureColumnExists(conn, tableName, columnName, definition) {
+  const [rows] = await conn.query(
+    `
+      SELECT 1
+      FROM information_schema.COLUMNS
+      WHERE TABLE_SCHEMA = ?
+        AND TABLE_NAME = ?
+        AND COLUMN_NAME = ?
+      LIMIT 1
+    `,
+    [DB_NAME, tableName, columnName]
+  );
+
+  if (rows.length === 0) {
+    await conn.query(`ALTER TABLE \`${tableName}\` ADD COLUMN ${definition}`);
+  }
+}
+
+// Initialize database
 async function initializeDatabase() {
   try {
+    const connection = await mysql.createConnection({
+      host: process.env.DB_HOST || 'localhost',
+      user: process.env.DB_USER || 'root',
+      password: process.env.DB_PASSWORD || ''
+    });
+    await connection.query(`CREATE DATABASE IF NOT EXISTS \`${DB_NAME}\``);
+    await connection.end();
 
     const conn = await pool.getConnection();
-    
-    // Table: users
+
     await conn.query(`
       CREATE TABLE IF NOT EXISTS users (
         id INT AUTO_INCREMENT PRIMARY KEY,
         name VARCHAR(100),
         email VARCHAR(100) UNIQUE NOT NULL,
-        password VARCHAR(100) NOT NULL,
-        role ENUM('admin','guru') DEFAULT 'guru',
+        password VARCHAR(255) NOT NULL,
+        role ENUM('admin', 'teacher') NOT NULL DEFAULT 'teacher',
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
 
-    // Table: students
+    await ensureColumnExists(
+      conn,
+      'users',
+      'role',
+      "role ENUM('admin', 'teacher') NOT NULL DEFAULT 'teacher' AFTER password"
+    );
+
+    // Students table
     await conn.query(`
       CREATE TABLE IF NOT EXISTS students (
         id VARCHAR(36) PRIMARY KEY DEFAULT (UUID()),
-        nis VARCHAR(50) UNIQUE NOT NULL,
+        user_id INT NOT NULL,
+        nis VARCHAR(50) NOT NULL,
         nama VARCHAR(255) NOT NULL,
         kelas VARCHAR(50) NOT NULL,
         jenis_kelamin ENUM('L', 'P') NOT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+        UNIQUE KEY unique_nis_per_user (user_id, nis)
       )
     `);
 
+    // Mata Pelajaran table
     await conn.query(`
       CREATE TABLE IF NOT EXISTS mata_pelajaran (
         id VARCHAR(36) PRIMARY KEY DEFAULT (UUID()),
+        user_id INT NOT NULL,
         nama_mapel VARCHAR(255) NOT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
       )
     `);
 
+    // Assignments (Tugas)
     await conn.query(`
       CREATE TABLE IF NOT EXISTS assignments (
         id VARCHAR(36) PRIMARY KEY DEFAULT (UUID()),
+        user_id INT NOT NULL,
         student_id VARCHAR(36) NOT NULL,
         mapel_id VARCHAR(36) NOT NULL,
         semester VARCHAR(50) NOT NULL,
         nilai DECIMAL(5,2) NOT NULL,
-        keterangan TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
         FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE CASCADE,
         FOREIGN KEY (mapel_id) REFERENCES mata_pelajaran(id) ON DELETE CASCADE
       )
     `);
 
+    // Midterms (UTS)
     await conn.query(`
       CREATE TABLE IF NOT EXISTS midterms (
         id VARCHAR(36) PRIMARY KEY DEFAULT (UUID()),
+        user_id INT NOT NULL,
         student_id VARCHAR(36) NOT NULL,
         mapel_id VARCHAR(36) NOT NULL,
         semester VARCHAR(50) NOT NULL,
         nilai DECIMAL(5,2) NOT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
         FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE CASCADE,
         FOREIGN KEY (mapel_id) REFERENCES mata_pelajaran(id) ON DELETE CASCADE,
         UNIQUE KEY unique_uts (student_id, mapel_id, semester)
       )
     `);
 
+    // Finals (UAS)
     await conn.query(`
       CREATE TABLE IF NOT EXISTS finals (
         id VARCHAR(36) PRIMARY KEY DEFAULT (UUID()),
+        user_id INT NOT NULL,
         student_id VARCHAR(36) NOT NULL,
         mapel_id VARCHAR(36) NOT NULL,
         semester VARCHAR(50) NOT NULL,
         nilai DECIMAL(5,2) NOT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
         FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE CASCADE,
         FOREIGN KEY (mapel_id) REFERENCES mata_pelajaran(id) ON DELETE CASCADE,
         UNIQUE KEY unique_uas (student_id, mapel_id, semester)
@@ -120,121 +186,139 @@ async function initializeDatabase() {
     `);
 
     conn.release();
-    console.log('✅ Database and tables initialized successfully');
+    console.log('✅ Database student_grade_hub initialized successfully');
   } catch (error) {
     console.error('❌ Database initialization error:', error);
     throw error;
   }
 }
 
-// ============ AUTH ROUTES ============
+async function getTeacherCount() {
+  const [rows] = await pool.query("SELECT COUNT(*) AS count FROM users WHERE role = 'teacher'");
+  return rows[0].count;
+}
 
-// POST /api/auth/register
+async function getAllGradesForAdmin() {
+  const [rows] = await pool.query(`
+    SELECT
+      combined.id,
+      combined.user_id,
+      combined.student_id,
+      combined.mapel_id,
+      combined.semester,
+      combined.nilai,
+      combined.grade_type,
+      combined.created_at,
+      s.nama AS student_name,
+      mp.nama_mapel AS subject_name,
+      u.name AS teacher_name
+    FROM (
+      SELECT id, user_id, student_id, mapel_id, semester, nilai, created_at, 'Tugas' AS grade_type
+      FROM assignments
+      UNION ALL
+      SELECT id, user_id, student_id, mapel_id, semester, nilai, created_at, 'UTS' AS grade_type
+      FROM midterms
+      UNION ALL
+      SELECT id, user_id, student_id, mapel_id, semester, nilai, created_at, 'UAS' AS grade_type
+      FROM finals
+    ) AS combined
+    LEFT JOIN students s ON combined.student_id = s.id
+    LEFT JOIN mata_pelajaran mp ON combined.mapel_id = mp.id
+    LEFT JOIN users u ON combined.user_id = u.id
+    ORDER BY combined.created_at DESC
+  `);
+
+  return rows;
+}
+
+// ============ AUTH ============
+
 app.post('/api/auth/register', async (req, res) => {
   try {
     const { name, email, password } = req.body;
-    if (!email || !password) {
-      return res.status(400).json({ error: 'Email dan password wajib diisi' });
-    }
+    if (!email || !password) return res.status(400).json({ error: 'Email dan password wajib diisi' });
 
     const [existing] = await pool.query('SELECT id FROM users WHERE email = ?', [email]);
-    if (existing.length > 0) {
-      return res.status(400).json({ error: 'Email sudah terdaftar' });
-    }
+    if (existing.length > 0) return res.status(400).json({ error: 'Email sudah terdaftar' });
 
-    const [result] = await pool.query(
-      'INSERT INTO users (name, email, password) VALUES (?, ?, ?)',
-      [name || null, email, password]
+    const [adminCountRows] = await pool.query("SELECT COUNT(*) AS count FROM users WHERE role = 'admin'");
+    const role = adminCountRows[0].count === 0 ? 'admin' : 'teacher';
+    const hashedPassword = await bcrypt.hash(password, 10);
+    await pool.query(
+      'INSERT INTO users (name, email, password, role) VALUES (?, ?, ?, ?)',
+      [name || null, email, hashedPassword, role]
     );
 
-    res.status(201).json({ message: 'Registrasi berhasil', user: { id: result.insertId, name, email, role: 'guru' } });
+    res.status(201).json({ message: 'Registrasi berhasil', role });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
-// POST /api/auth/login
 app.post('/api/auth/login', async (req, res) => {
   try {
     const { email, password } = req.body;
-    if (!email || !password) {
-      return res.status(400).json({ error: 'Email dan password wajib diisi' });
-    }
+    if (!email || !password) return res.status(400).json({ error: 'Email dan password wajib diisi' });
 
-    const [rows] = await pool.query('SELECT * FROM users WHERE email = ? AND password = ?', [email, password]);
-    if (rows.length === 0) {
-      return res.status(401).json({ error: 'Email atau password salah' });
-    }
+    const [rows] = await pool.query('SELECT * FROM users WHERE email = ?', [email]);
+    if (rows.length === 0) return res.status(401).json({ error: 'Email atau password salah' });
 
     const user = rows[0];
-    const token = generateToken();
-    sessions.set(token, { id: user.id, name: user.name, email: user.email, role: user.role });
+    const validPassword = await bcrypt.compare(password, user.password);
+    if (!validPassword) return res.status(401).json({ error: 'Email atau password salah' });
 
-    res.json({ token, user: { id: user.id, name: user.name, email: user.email, role: user.role } });
+    const payload = buildUserPayload(user);
+    const token = jwt.sign(payload, JWT_SECRET, { expiresIn: '7d' });
+    res.json({ token, user: payload });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
-// GET /api/auth/profile
-app.get('/api/auth/profile', authMiddleware, (req, res) => {
-  res.json(req.user);
-});
-
-// POST /api/auth/logout
-app.post('/api/auth/logout', (req, res) => {
-  const token = req.headers.authorization?.replace('Bearer ', '');
-  if (token) sessions.delete(token);
-  res.json({ message: 'Logout berhasil' });
-});
-
-// ============ STUDENTS ROUTES ============
-
-// GET all students
-app.get('/api/siswa', async (req, res) => {
+app.get('/api/auth/profile', authMiddleware, async (req, res) => {
   try {
-    const [rows] = await pool.query('SELECT * FROM students ORDER BY nama');
-    res.json(rows);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// GET student by id
-app.get('/api/siswa/:id', async (req, res) => {
-  try {
-    const [rows] = await pool.query('SELECT * FROM students WHERE id = ?', [req.params.id]);
-    if (rows.length === 0) {
-      return res.status(404).json({ error: 'Student not found' });
-    }
+    const [rows] = await pool.query('SELECT id, name, email, role, created_at FROM users WHERE id = ?', [req.user.id]);
+    if (rows.length === 0) return res.status(404).json({ error: 'User not found' });
     res.json(rows[0]);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
-// POST new student
-app.post('/api/siswa', async (req, res) => {
+// ============ STUDENTS (user-scoped) ============
+
+app.get('/api/siswa', authMiddleware, async (req, res) => {
   try {
-    const { nis, nama, kelas, jenis_kelamin } = req.body;
-    const id = require('crypto').randomUUID();
-    await pool.query(
-      'INSERT INTO students (id, nis, nama, kelas, jenis_kelamin) VALUES (?, ?, ?, ?, ?)',
-      [id, nis, nama, kelas, jenis_kelamin]
-    );
-    res.status(201).json({ id, nis, nama, kelas, jenis_kelamin });
+    const [rows] = await pool.query('SELECT * FROM students WHERE user_id = ? ORDER BY nama', [req.user.id]);
+    res.json(rows);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
-// PUT update student
-app.put('/api/siswa/:id', async (req, res) => {
+app.post('/api/siswa', authMiddleware, async (req, res) => {
+  try {
+    const { nis, nama, kelas, jenis_kelamin } = req.body;
+    if (!nis || !nama || !kelas || !jenis_kelamin) {
+      return res.status(400).json({ error: 'Semua field wajib diisi' });
+    }
+    const id = crypto.randomUUID();
+    await pool.query(
+      'INSERT INTO students (id, user_id, nis, nama, kelas, jenis_kelamin) VALUES (?, ?, ?, ?, ?, ?)',
+      [id, req.user.id, nis, nama, kelas, jenis_kelamin]
+    );
+    res.status(201).json({ id, user_id: req.user.id, nis, nama, kelas, jenis_kelamin });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.put('/api/siswa/:id', authMiddleware, async (req, res) => {
   try {
     const { nis, nama, kelas, jenis_kelamin } = req.body;
     await pool.query(
-      'UPDATE students SET nis = ?, nama = ?, kelas = ?, jenis_kelamin = ? WHERE id = ?',
-      [nis, nama, kelas, jenis_kelamin, req.params.id]
+      'UPDATE students SET nis = ?, nama = ?, kelas = ?, jenis_kelamin = ? WHERE id = ? AND user_id = ?',
+      [nis, nama, kelas, jenis_kelamin, req.params.id, req.user.id]
     );
     res.json({ id: req.params.id, nis, nama, kelas, jenis_kelamin });
   } catch (error) {
@@ -242,50 +326,47 @@ app.put('/api/siswa/:id', async (req, res) => {
   }
 });
 
-// DELETE student
-app.delete('/api/siswa/:id', async (req, res) => {
+app.delete('/api/siswa/:id', authMiddleware, async (req, res) => {
   try {
-    await pool.query('DELETE FROM students WHERE id = ?', [req.params.id]);
-    res.json({ message: 'Student deleted successfully' });
+    await pool.query('DELETE FROM students WHERE id = ? AND user_id = ?', [req.params.id, req.user.id]);
+    res.json({ message: 'Student deleted' });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
-// ============ MATA PELAJARAN ROUTES ============
+// ============ MATA PELAJARAN (user-scoped) ============
 
-// GET all subjects
-app.get('/api/mapel', async (req, res) => {
+app.get('/api/mapel', authMiddleware, async (req, res) => {
   try {
-    const [rows] = await pool.query('SELECT * FROM mata_pelajaran ORDER BY nama_mapel');
+    const [rows] = await pool.query('SELECT * FROM mata_pelajaran WHERE user_id = ? ORDER BY nama_mapel', [req.user.id]);
     res.json(rows);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
-// POST new subject
-app.post('/api/mapel', async (req, res) => {
+app.post('/api/mapel', authMiddleware, async (req, res) => {
   try {
     const { nama_mapel } = req.body;
-    const id = require('crypto').randomUUID();
+    if (!nama_mapel) return res.status(400).json({ error: 'Nama mata pelajaran wajib diisi' });
+    const id = crypto.randomUUID();
     await pool.query(
-      'INSERT INTO mata_pelajaran (id, nama_mapel) VALUES (?, ?)',
-      [id, nama_mapel]
+      'INSERT INTO mata_pelajaran (id, user_id, nama_mapel) VALUES (?, ?, ?)',
+      [id, req.user.id, nama_mapel]
     );
-    res.status(201).json({ id, nama_mapel });
+    res.status(201).json({ id, user_id: req.user.id, nama_mapel });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
-// PUT update subject
-app.put('/api/mapel/:id', async (req, res) => {
+app.put('/api/mapel/:id', authMiddleware, async (req, res) => {
   try {
     const { nama_mapel } = req.body;
     await pool.query(
-      'UPDATE mata_pelajaran SET nama_mapel = ? WHERE id = ?',
-      [nama_mapel, req.params.id]
+      'UPDATE mata_pelajaran SET nama_mapel = ? WHERE id = ? AND user_id = ?',
+      [nama_mapel, req.params.id, req.user.id]
     );
     res.json({ id: req.params.id, nama_mapel });
   } catch (error) {
@@ -293,11 +374,10 @@ app.put('/api/mapel/:id', async (req, res) => {
   }
 });
 
-// DELETE subject
-app.delete('/api/mapel/:id', async (req, res) => {
+app.delete('/api/mapel/:id', authMiddleware, async (req, res) => {
   try {
-    await pool.query('DELETE FROM mata_pelajaran WHERE id = ?', [req.params.id]);
-    res.json({ message: 'Subject deleted successfully' });
+    await pool.query('DELETE FROM mata_pelajaran WHERE id = ? AND user_id = ?', [req.params.id, req.user.id]);
+    res.json({ message: 'Subject deleted' });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -305,245 +385,1396 @@ app.delete('/api/mapel/:id', async (req, res) => {
 
 // ============ NILAI ROUTES ============
 
-// GET all assignments
-app.get('/api/nilai/tugas', async (req, res) => {
-  try {
-    const [rows] = await pool.query(`
-      SELECT a.*, s.nama as student_name, s.kelas, m.nama_mapel
-      FROM assignments a
-      LEFT JOIN students s ON a.student_id = s.id
-      LEFT JOIN mata_pelajaran m ON a.mapel_id = m.id
-      ORDER BY a.created_at DESC
-    `);
-    res.json(rows);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
+async function getUserGradeRows(tableName, userId, gradeType) {
+  const [rows] = await pool.query(
+    `
+      SELECT
+        g.*,
+        s.nama AS student_name,
+        mp.nama_mapel AS subject_name,
+        ? AS grade_type
+      FROM ${tableName} g
+      LEFT JOIN students s ON g.student_id = s.id
+      LEFT JOIN mata_pelajaran mp ON g.mapel_id = mp.id
+      WHERE g.user_id = ?
+      ORDER BY g.created_at DESC
+    `,
+    [gradeType, userId]
+  );
+  return rows;
+}
 
-// POST assignment
-app.post('/api/nilai/tugas', async (req, res) => {
-  try {
-    const { student_id, mapel_id, semester, nilai, keterangan } = req.body;
-    const id = require('crypto').randomUUID();
-    await pool.query(
-      'INSERT INTO assignments (id, student_id, mapel_id, semester, nilai, keterangan) VALUES (?, ?, ?, ?, ?, ?)',
-      [id, student_id, mapel_id, semester, nilai, keterangan]
-    );
-    res.status(201).json({ id, student_id, mapel_id, semester, nilai, keterangan });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// PUT update assignment
-app.put('/api/nilai/tugas/:id', async (req, res) => {
-  try {
-    const { student_id, mapel_id, semester, nilai, keterangan } = req.body;
-    await pool.query(
-      'UPDATE assignments SET student_id = ?, mapel_id = ?, semester = ?, nilai = ?, keterangan = ? WHERE id = ?',
-      [student_id, mapel_id, semester, nilai, keterangan, req.params.id]
-    );
-    res.json({ id: req.params.id, student_id, mapel_id, semester, nilai, keterangan });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// DELETE assignment
-app.delete('/api/nilai/tugas/:id', async (req, res) => {
-  try {
-    await pool.query('DELETE FROM assignments WHERE id = ?', [req.params.id]);
-    res.json({ message: 'Assignment deleted successfully' });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// GET all midterms
-app.get('/api/nilai/uts', async (req, res) => {
-  try {
-    const [rows] = await pool.query(`
-      SELECT m.*, s.nama as student_name, s.kelas, mp.nama_mapel
-      FROM midterms m
-      LEFT JOIN students s ON m.student_id = s.id
-      LEFT JOIN mata_pelajaran mp ON m.mapel_id = mp.id
-      ORDER BY m.created_at DESC
-    `);
-    res.json(rows);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// POST midterm
-app.post('/api/nilai/uts', async (req, res) => {
-  try {
-    const { student_id, mapel_id, semester, nilai } = req.body;
-    
-    // Check if already exists
-    const [existing] = await pool.query(
-      'SELECT id FROM midterms WHERE student_id = ? AND mapel_id = ? AND semester = ?',
-      [student_id, mapel_id, semester]
-    );
-    
-    if (existing.length > 0) {
-      return res.status(400).json({ error: 'UTS sudah ada untuk siswa, mata pelajaran, dan semester ini' });
+function registerGradeRoutes(basePath, tableName, gradeType) {
+  app.get(basePath, authMiddleware, async (req, res) => {
+    try {
+      const rows = await getUserGradeRows(tableName, req.user.id, gradeType);
+      res.json(rows);
+    } catch (error) {
+      res.status(500).json({ error: error.message });
     }
-    
-    const id = require('crypto').randomUUID();
-    await pool.query(
-      'INSERT INTO midterms (id, student_id, mapel_id, semester, nilai) VALUES (?, ?, ?, ?, ?)',
-      [id, student_id, mapel_id, semester, nilai]
-    );
-    res.status(201).json({ id, student_id, mapel_id, semester, nilai });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
+  });
 
-// PUT update midterm
-app.put('/api/nilai/uts/:id', async (req, res) => {
-  try {
-    const { student_id, mapel_id, semester, nilai } = req.body;
-    await pool.query(
-      'UPDATE midterms SET student_id = ?, mapel_id = ?, semester = ?, nilai = ? WHERE id = ?',
-      [student_id, mapel_id, semester, nilai, req.params.id]
-    );
-    res.json({ id: req.params.id, student_id, mapel_id, semester, nilai });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// DELETE midterm
-app.delete('/api/nilai/uts/:id', async (req, res) => {
-  try {
-    await pool.query('DELETE FROM midterms WHERE id = ?', [req.params.id]);
-    res.json({ message: 'Midterm deleted successfully' });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// GET all finals
-app.get('/api/nilai/uas', async (req, res) => {
-  try {
-    const [rows] = await pool.query(`
-      SELECT f.*, s.nama as student_name, s.kelas, mp.nama_mapel
-      FROM finals f
-      LEFT JOIN students s ON f.student_id = s.id
-      LEFT JOIN mata_pelajaran mp ON f.mapel_id = mp.id
-      ORDER BY f.created_at DESC
-    `);
-    res.json(rows);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// POST final
-app.post('/api/nilai/uas', async (req, res) => {
-  try {
-    const { student_id, mapel_id, semester, nilai } = req.body;
-    
-    // Check if already exists
-    const [existing] = await pool.query(
-      'SELECT id FROM finals WHERE student_id = ? AND mapel_id = ? AND semester = ?',
-      [student_id, mapel_id, semester]
-    );
-    
-    if (existing.length > 0) {
-      return res.status(400).json({ error: 'UAS sudah ada untuk siswa, mata pelajaran, dan semester ini' });
+  app.post(basePath, authMiddleware, async (req, res) => {
+    try {
+      const { student_id, mapel_id, semester, nilai } = req.body;
+      if (!student_id || !mapel_id || !semester || nilai === undefined) {
+        return res.status(400).json({ error: 'Semua field wajib diisi' });
+      }
+      const id = crypto.randomUUID();
+      await pool.query(
+        `INSERT INTO ${tableName} (id, user_id, student_id, mapel_id, semester, nilai) VALUES (?, ?, ?, ?, ?, ?)`,
+        [id, req.user.id, student_id, mapel_id, semester, nilai]
+      );
+      res.status(201).json({ id, user_id: req.user.id, student_id, mapel_id, semester, nilai });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
     }
-    
-    const id = require('crypto').randomUUID();
-    await pool.query(
-      'INSERT INTO finals (id, student_id, mapel_id, semester, nilai) VALUES (?, ?, ?, ?, ?)',
-      [id, student_id, mapel_id, semester, nilai]
+  });
+
+  app.put(`${basePath}/:id`, authMiddleware, async (req, res) => {
+    try {
+      const { student_id, mapel_id, semester, nilai } = req.body;
+      await pool.query(
+        `UPDATE ${tableName} SET student_id = ?, mapel_id = ?, semester = ?, nilai = ? WHERE id = ? AND user_id = ?`,
+        [student_id, mapel_id, semester, nilai, req.params.id, req.user.id]
+      );
+      res.json({ id: req.params.id, student_id, mapel_id, semester, nilai });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.delete(`${basePath}/:id`, authMiddleware, async (req, res) => {
+    try {
+      await pool.query(`DELETE FROM ${tableName} WHERE id = ? AND user_id = ?`, [req.params.id, req.user.id]);
+      res.json({ message: 'Grade deleted' });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+}
+
+registerGradeRoutes('/api/nilai/tugas', 'assignments', 'Tugas');
+registerGradeRoutes('/api/nilai/uts', 'midterms', 'UTS');
+registerGradeRoutes('/api/nilai/uas', 'finals', 'UAS');
+
+// ============ DASHBOARD ============
+
+app.get('/api/dashboard/stats', authMiddleware, async (req, res) => {
+  try {
+    const [studentsCount] = await pool.query('SELECT COUNT(*) AS count FROM students WHERE user_id = ?', [req.user.id]);
+    const [subjectsCount] = await pool.query('SELECT COUNT(*) AS count FROM mata_pelajaran WHERE user_id = ?', [req.user.id]);
+    const [gradesCount] = await pool.query(
+      `
+        SELECT (
+          (SELECT COUNT(*) FROM assignments WHERE user_id = ?) +
+          (SELECT COUNT(*) FROM midterms WHERE user_id = ?) +
+          (SELECT COUNT(*) FROM finals WHERE user_id = ?)
+        ) AS count
+      `,
+      [req.user.id, req.user.id, req.user.id]
     );
-    res.status(201).json({ id, student_id, mapel_id, semester, nilai });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// PUT update final
-app.put('/api/nilai/uas/:id', async (req, res) => {
-  try {
-    const { student_id, mapel_id, semester, nilai } = req.body;
-    await pool.query(
-      'UPDATE finals SET student_id = ?, mapel_id = ?, semester = ?, nilai = ? WHERE id = ?',
-      [student_id, mapel_id, semester, nilai, req.params.id]
+    const [avgScoreRows] = await pool.query(
+      `
+        SELECT AVG(nilai) AS avg_score
+        FROM (
+          SELECT nilai FROM assignments WHERE user_id = ?
+          UNION ALL
+          SELECT nilai FROM midterms WHERE user_id = ?
+          UNION ALL
+          SELECT nilai FROM finals WHERE user_id = ?
+        ) AS all_scores
+      `,
+      [req.user.id, req.user.id, req.user.id]
     );
-    res.json({ id: req.params.id, student_id, mapel_id, semester, nilai });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// DELETE final
-app.delete('/api/nilai/uas/:id', async (req, res) => {
-  try {
-    await pool.query('DELETE FROM finals WHERE id = ?', [req.params.id]);
-    res.json({ message: 'Final exam deleted successfully' });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// ============ DASHBOARD STATS ============
-
-app.get('/api/dashboard/stats', async (req, res) => {
-  try {
-    const [studentsCount] = await pool.query('SELECT COUNT(*) as count FROM students');
-    const [avgTugas] = await pool.query('SELECT AVG(nilai) as avg FROM assignments');
-    const [avgUts] = await pool.query('SELECT AVG(nilai) as avg FROM midterms');
-    const [avgUas] = await pool.query('SELECT AVG(nilai) as avg FROM finals');
-    const [students] = await pool.query('SELECT * FROM students');
-    const [assignments] = await pool.query('SELECT * FROM assignments');
-    const [midterms] = await pool.query('SELECT * FROM midterms');
-    const [finals] = await pool.query('SELECT * FROM finals');
 
     res.json({
       totalStudents: studentsCount[0].count,
-      avgAssignments: avgTugas[0].avg || 0,
-      avgMidterms: avgUts[0].avg || 0,
-      avgFinals: avgUas[0].avg || 0,
-      students,
-      assignments,
-      midterms,
-      finals
+      totalSubjects: subjectsCount[0].count,
+      totalGrades: gradesCount[0].count,
+      avgScore: Number(avgScoreRows[0].avg_score || 0),
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
-// ============ DETAIL NILAI ============
+// ============ ADMIN ============
 
-app.get('/api/nilai/detail', async (req, res) => {
+app.get('/api/admin/summary', authMiddleware, adminOnly, async (req, res) => {
   try {
-    const { student_id, semester, mapel_id } = req.query;
-    
-    let assignmentQuery = 'SELECT a.*, m.nama_mapel FROM assignments a LEFT JOIN mata_pelajaran m ON a.mapel_id = m.id WHERE a.student_id = ? AND a.semester = ?';
-    let midtermQuery = 'SELECT m.*, mp.nama_mapel FROM midterms m LEFT JOIN mata_pelajaran mp ON m.mapel_id = mp.id WHERE m.student_id = ? AND m.semester = ?';
-    let finalQuery = 'SELECT f.*, mp.nama_mapel FROM finals f LEFT JOIN mata_pelajaran mp ON f.mapel_id = mp.id WHERE f.student_id = ? AND f.semester = ?';
-    
-    const params = [student_id, semester];
-    
-    if (mapel_id) {
-      assignmentQuery += ' AND a.mapel_id = ?';
-      midtermQuery += ' AND m.mapel_id = ?';
-      finalQuery += ' AND f.mapel_id = ?';
-      params.push(mapel_id);
+    const totalTeachers = await getTeacherCount();
+    const [studentsRows] = await pool.query('SELECT COUNT(*) AS count FROM students');
+    const [subjectsRows] = await pool.query('SELECT COUNT(*) AS count FROM mata_pelajaran');
+    const allGrades = await getAllGradesForAdmin();
+
+    res.json({
+      totalTeachers,
+      totalStudents: studentsRows[0].count,
+      totalSubjects: subjectsRows[0].count,
+      totalGrades: allGrades.length,
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/admin/teachers', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const [rows] = await pool.query(`
+      SELECT id, name, email, role, created_at
+      FROM users
+      WHERE role = 'teacher'
+      ORDER BY name ASC, email ASC
+    `);
+    res.json(rows);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/admin/students', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const [rows] = await pool.query(`
+      SELECT
+        s.*,
+        s.nama AS name,
+        u.name AS teacher_name,
+        u.email AS teacher_email
+      FROM students s
+      LEFT JOIN users u ON s.user_id = u.id
+      ORDER BY s.created_at DESC
+    `);
+    res.json(rows);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/admin/grades', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const rows = await getAllGradesForAdmin();
+    res.json(rows);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ============ SERVER START ============
+
+initializeDatabase().then(() => {
+  app.listen(PORT, () => {
+    console.log(`🚀 Server running on http://localhost:${PORT}`);
+  });
+}).catch(error => {
+  console.error('Failed to start server:', error);
+  process.exit(1);
+});
+const express = require('express');
+const mysql = require('mysql2/promise');
+const cors = require('cors');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
+require('dotenv').config();
+
+const app = express();
+const PORT = process.env.PORT || 3001;
+const DB_NAME = process.env.DB_NAME || 'student_grade_hub';
+const JWT_SECRET = process.env.JWT_SECRET || 'student_grade_hub_secret_key_2024';
+
+app.use(cors());
+app.use(express.json());
+
+// Database connection pool
+const pool = mysql.createPool({
+  host: process.env.DB_HOST || 'localhost',
+  user: process.env.DB_USER || 'root',
+  password: process.env.DB_PASSWORD || '',
+  database: DB_NAME,
+  waitForConnections: true,
+  connectionLimit: 10,
+  queueLimit: 0
+});
+
+function buildUserPayload(user) {
+  return {
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    role: user.role || 'teacher',
+  };
+}
+
+// JWT Auth Middleware
+function authMiddleware(req, res, next) {
+  const token = req.headers.authorization?.replace('Bearer ', '');
+  if (!token) return res.status(401).json({ error: 'Unauthorized' });
+
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET);
+    req.user = decoded;
+    next();
+  } catch {
+    return res.status(401).json({ error: 'Token tidak valid' });
+  }
+}
+
+function adminOnly(req, res, next) {
+  if (req.user?.role !== 'admin') {
+    return res.status(403).json({ error: 'Akses admin diperlukan' });
+  }
+  next();
+}
+
+async function ensureColumnExists(conn, tableName, columnName, definition) {
+  const [rows] = await conn.query(
+    `
+      SELECT 1
+      FROM information_schema.COLUMNS
+      WHERE TABLE_SCHEMA = ?
+        AND TABLE_NAME = ?
+        AND COLUMN_NAME = ?
+      LIMIT 1
+    `,
+    [DB_NAME, tableName, columnName]
+  );
+
+  if (rows.length === 0) {
+    await conn.query(`ALTER TABLE \`${tableName}\` ADD COLUMN ${definition}`);
+  }
+}
+
+// Initialize database
+async function initializeDatabase() {
+  try {
+    const connection = await mysql.createConnection({
+      host: process.env.DB_HOST || 'localhost',
+      user: process.env.DB_USER || 'root',
+      password: process.env.DB_PASSWORD || ''
+    });
+    await connection.query(`CREATE DATABASE IF NOT EXISTS \`${DB_NAME}\``);
+    await connection.end();
+
+    const conn = await pool.getConnection();
+
+    await conn.query(`
+      CREATE TABLE IF NOT EXISTS users (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        name VARCHAR(100),
+        email VARCHAR(100) UNIQUE NOT NULL,
+        password VARCHAR(255) NOT NULL,
+        role ENUM('admin', 'teacher') NOT NULL DEFAULT 'teacher',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    await ensureColumnExists(
+      conn,
+      'users',
+      'role',
+      "role ENUM('admin', 'teacher') NOT NULL DEFAULT 'teacher' AFTER password"
+    );
+
+    // Students table dengan field lengkap
+    await conn.query(`
+      CREATE TABLE IF NOT EXISTS students (
+        id VARCHAR(36) PRIMARY KEY DEFAULT (UUID()),
+        user_id INT NOT NULL,
+        nis VARCHAR(50) NOT NULL,
+        nama VARCHAR(255) NOT NULL,
+        kelas VARCHAR(50) NOT NULL,
+        jenis_kelamin ENUM('L', 'P') NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+        UNIQUE KEY unique_nis_per_user (user_id, nis)
+      )
+    `);
+
+    // Mata Pelajaran table
+    await conn.query(`
+      CREATE TABLE IF NOT EXISTS mata_pelajaran (
+        id VARCHAR(36) PRIMARY KEY DEFAULT (UUID()),
+        user_id INT NOT NULL,
+        nama_mapel VARCHAR(255) NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+      )
+    `);
+
+    // Assignments (Tugas)
+    await conn.query(`
+      CREATE TABLE IF NOT EXISTS assignments (
+        id VARCHAR(36) PRIMARY KEY DEFAULT (UUID()),
+        user_id INT NOT NULL,
+        student_id VARCHAR(36) NOT NULL,
+        mapel_id VARCHAR(36) NOT NULL,
+        semester VARCHAR(50) NOT NULL,
+        nilai DECIMAL(5,2) NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+        FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE CASCADE,
+        FOREIGN KEY (mapel_id) REFERENCES mata_pelajaran(id) ON DELETE CASCADE
+      )
+    `);
+
+    // Midterms (UTS)
+    await conn.query(`
+      CREATE TABLE IF NOT EXISTS midterms (
+        id VARCHAR(36) PRIMARY KEY DEFAULT (UUID()),
+        user_id INT NOT NULL,
+        student_id VARCHAR(36) NOT NULL,
+        mapel_id VARCHAR(36) NOT NULL,
+        semester VARCHAR(50) NOT NULL,
+        nilai DECIMAL(5,2) NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+        FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE CASCADE,
+        FOREIGN KEY (mapel_id) REFERENCES mata_pelajaran(id) ON DELETE CASCADE,
+        UNIQUE KEY unique_uts (student_id, mapel_id, semester)
+      )
+    `);
+
+    // Finals (UAS)
+    await conn.query(`
+      CREATE TABLE IF NOT EXISTS finals (
+        id VARCHAR(36) PRIMARY KEY DEFAULT (UUID()),
+        user_id INT NOT NULL,
+        student_id VARCHAR(36) NOT NULL,
+        mapel_id VARCHAR(36) NOT NULL,
+        semester VARCHAR(50) NOT NULL,
+        nilai DECIMAL(5,2) NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+        FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE CASCADE,
+        FOREIGN KEY (mapel_id) REFERENCES mata_pelajaran(id) ON DELETE CASCADE,
+        UNIQUE KEY unique_uas (student_id, mapel_id, semester)
+      )
+    `);
+
+    conn.release();
+    console.log('✅ Database student_grade_hub initialized successfully');
+  } catch (error) {
+    console.error('❌ Database initialization error:', error);
+    throw error;
+  }
+}
+
+async function getTeacherCount() {
+  const [rows] = await pool.query("SELECT COUNT(*) AS count FROM users WHERE role = 'teacher'");
+  return rows[0].count;
+}
+
+async function getAllGradesForAdmin() {
+  const [rows] = await pool.query(`
+    SELECT
+      combined.id,
+      combined.user_id,
+      combined.student_id,
+      combined.mapel_id,
+      combined.semester,
+      combined.nilai AS score,
+      combined.nilai,
+      combined.grade_type,
+      combined.created_at,
+      s.nama AS student_name,
+      mp.nama_mapel AS subject_name,
+      u.name AS teacher_name
+    FROM (
+      SELECT id, user_id, student_id, mapel_id, semester, nilai, created_at, 'Tugas' AS grade_type
+      FROM assignments
+      UNION ALL
+      SELECT id, user_id, student_id, mapel_id, semester, nilai, created_at, 'UTS' AS grade_type
+      FROM midterms
+      UNION ALL
+      SELECT id, user_id, student_id, mapel_id, semester, nilai, created_at, 'UAS' AS grade_type
+      FROM finals
+    ) AS combined
+    LEFT JOIN students s ON combined.student_id = s.id
+    LEFT JOIN mata_pelajaran mp ON combined.mapel_id = mp.id
+    LEFT JOIN users u ON combined.user_id = u.id
+    ORDER BY combined.created_at DESC
+  `);
+
+  return rows;
+}
+
+// ============ AUTH ============
+
+app.post('/api/auth/register', async (req, res) => {
+  try {
+    const { name, email, password } = req.body;
+    if (!email || !password) return res.status(400).json({ error: 'Email dan password wajib diisi' });
+
+    const [existing] = await pool.query('SELECT id FROM users WHERE email = ?', [email]);
+    if (existing.length > 0) return res.status(400).json({ error: 'Email sudah terdaftar' });
+
+    const [adminCountRows] = await pool.query("SELECT COUNT(*) AS count FROM users WHERE role = 'admin'");
+    const role = adminCountRows[0].count === 0 ? 'admin' : 'teacher';
+    const hashedPassword = await bcrypt.hash(password, 10);
+    await pool.query(
+      'INSERT INTO users (name, email, password, role) VALUES (?, ?, ?, ?)',
+      [name || null, email, hashedPassword, role]
+    );
+
+    res.status(201).json({ message: 'Registrasi berhasil', role });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/auth/login', async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    if (!email || !password) return res.status(400).json({ error: 'Email dan password wajib diisi' });
+
+    const [rows] = await pool.query('SELECT * FROM users WHERE email = ?', [email]);
+    if (rows.length === 0) return res.status(401).json({ error: 'Email atau password salah' });
+
+    const user = rows[0];
+    const validPassword = await bcrypt.compare(password, user.password);
+    if (!validPassword) return res.status(401).json({ error: 'Email atau password salah' });
+
+    const payload = buildUserPayload(user);
+    const token = jwt.sign(payload, JWT_SECRET, { expiresIn: '7d' });
+    res.json({ token, user: payload });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/auth/profile', authMiddleware, async (req, res) => {
+  try {
+    const [rows] = await pool.query('SELECT id, name, email, role, created_at FROM users WHERE id = ?', [req.user.id]);
+    if (rows.length === 0) return res.status(404).json({ error: 'User not found' });
+    res.json(rows[0]);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ============ STUDENTS (user-scoped) ============
+
+app.get('/api/siswa', authMiddleware, async (req, res) => {
+  try {
+    const [rows] = await pool.query('SELECT * FROM students WHERE user_id = ? ORDER BY nama', [req.user.id]);
+    res.json(rows);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/siswa', authMiddleware, async (req, res) => {
+  try {
+    const { nis, nama, kelas, jenis_kelamin } = req.body;
+    if (!nis || !nama || !kelas || !jenis_kelamin) {
+      return res.status(400).json({ error: 'Semua field wajib diisi' });
     }
+    const id = require('crypto').randomUUID();
+    await pool.query(
+      'INSERT INTO students (id, user_id, nis, nama, kelas, jenis_kelamin) VALUES (?, ?, ?, ?, ?, ?)',
+      [id, req.user.id, nis, nama, kelas, jenis_kelamin]
+    );
+    res.status(201).json({ id, user_id: req.user.id, nis, nama, kelas, jenis_kelamin });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
 
-    const [assignments] = await pool.query(assignmentQuery, params);
-    const [midterms] = await pool.query(midtermQuery, params);
-    const [finals] = await pool.query(finalQuery, params);
+app.put('/api/siswa/:id', authMiddleware, async (req, res) => {
+  try {
+    const { nis, nama, kelas, jenis_kelamin } = req.body;
+    await pool.query(
+      'UPDATE students SET nis = ?, nama = ?, kelas = ?, jenis_kelamin = ? WHERE id = ? AND user_id = ?',
+      [nis, nama, kelas, jenis_kelamin, req.params.id, req.user.id]
+    );
+    res.json({ id: req.params.id, nis, nama, kelas, jenis_kelamin });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
 
-    res.json({ assignments, midterms, finals });
+app.delete('/api/siswa/:id', authMiddleware, async (req, res) => {
+  try {
+    await pool.query('DELETE FROM students WHERE id = ? AND user_id = ?', [req.params.id, req.user.id]);
+    res.json({ message: 'Student deleted' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ============ MATA PELAJARAN (user-scoped) ============
+
+app.get('/api/mapel', authMiddleware, async (req, res) => {
+  try {
+    const [rows] = await pool.query('SELECT * FROM mata_pelajaran WHERE user_id = ? ORDER BY nama_mapel', [req.user.id]);
+    res.json(rows);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/mapel', authMiddleware, async (req, res) => {
+  try {
+    const { nama_mapel } = req.body;
+    if (!nama_mapel) return res.status(400).json({ error: 'Nama mata pelajaran wajib diisi' });
+    const id = require('crypto').randomUUID();
+    await pool.query(
+      'INSERT INTO mata_pelajaran (id, user_id, nama_mapel) VALUES (?, ?, ?)',
+      [id, req.user.id, nama_mapel]
+    );
+    res.status(201).json({ id, user_id: req.user.id, nama_mapel });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.put('/api/mapel/:id', authMiddleware, async (req, res) => {
+  try {
+    const { nama_mapel } = req.body;
+    await pool.query(
+      'UPDATE mata_pelajaran SET nama_mapel = ? WHERE id = ? AND user_id = ?',
+      [nama_mapel, req.params.id, req.user.id]
+    );
+    res.json({ id: req.params.id, nama_mapel });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.delete('/api/mapel/:id', authMiddleware, async (req, res) => {
+  try {
+    await pool.query('DELETE FROM mata_pelajaran WHERE id = ? AND user_id = ?', [req.params.id, req.user.id]);
+    res.json({ message: 'Subject deleted' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ============ NILAI ROUTES ============
+
+async function getUserGradeRows(tableName, userId, gradeType) {
+  const [rows] = await pool.query(
+    `
+      SELECT
+        g.*,
+        s.nama AS student_name,
+        mp.nama_mapel AS subject_name,
+        ? AS grade_type
+      FROM ${tableName} g
+      LEFT JOIN students s ON g.student_id = s.id
+      LEFT JOIN mata_pelajaran mp ON g.mapel_id = mp.id
+      WHERE g.user_id = ?
+      ORDER BY g.created_at DESC
+    `,
+    [gradeType, userId]
+  );
+  return rows;
+}
+
+function registerGradeRoutes(basePath, tableName, gradeType) {
+  app.get(basePath, authMiddleware, async (req, res) => {
+    try {
+      const rows = await getUserGradeRows(tableName, req.user.id, gradeType);
+      res.json(rows);
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post(basePath, authMiddleware, async (req, res) => {
+    try {
+      const { student_id, mapel_id, semester, nilai } = req.body;
+      if (!student_id || !mapel_id || !semester || nilai === undefined) {
+        return res.status(400).json({ error: 'Semua field wajib diisi' });
+      }
+      const id = crypto.randomUUID();
+      await pool.query(
+        `INSERT INTO ${tableName} (id, user_id, student_id, mapel_id, semester, nilai) VALUES (?, ?, ?, ?, ?, ?)`,
+        [id, req.user.id, student_id, mapel_id, semester, nilai]
+      );
+      res.status(201).json({ id, user_id: req.user.id, student_id, mapel_id, semester, nilai });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.put(`${basePath}/:id`, authMiddleware, async (req, res) => {
+    try {
+      const { student_id, mapel_id, semester, nilai } = req.body;
+      await pool.query(
+        `UPDATE ${tableName} SET student_id = ?, mapel_id = ?, semester = ?, nilai = ? WHERE id = ? AND user_id = ?`,
+        [student_id, mapel_id, semester, nilai, req.params.id, req.user.id]
+      );
+      res.json({ id: req.params.id, student_id, mapel_id, semester, nilai });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.delete(`${basePath}/:id`, authMiddleware, async (req, res) => {
+    try {
+      await pool.query(`DELETE FROM ${tableName} WHERE id = ? AND user_id = ?`, [req.params.id, req.user.id]);
+      res.json({ message: 'Grade deleted' });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+}
+
+registerGradeRoutes('/api/nilai/tugas', 'assignments', 'Tugas');
+registerGradeRoutes('/api/nilai/uts', 'midterms', 'UTS');
+registerGradeRoutes('/api/nilai/uas', 'finals', 'UAS');
+
+// ============ DASHBOARD ============
+
+app.get('/api/dashboard/stats', authMiddleware, async (req, res) => {
+  try {
+    const [studentsCount] = await pool.query('SELECT COUNT(*) AS count FROM students WHERE user_id = ?', [req.user.id]);
+    const [subjectsCount] = await pool.query('SELECT COUNT(*) AS count FROM mata_pelajaran WHERE user_id = ?', [req.user.id]);
+    const [gradesCount] = await pool.query(
+      `
+        SELECT (
+          (SELECT COUNT(*) FROM assignments WHERE user_id = ?) +
+          (SELECT COUNT(*) FROM midterms WHERE user_id = ?) +
+          (SELECT COUNT(*) FROM finals WHERE user_id = ?)
+        ) AS count
+      `,
+      [req.user.id, req.user.id, req.user.id]
+    );
+    const [avgScoreRows] = await pool.query(
+      `
+        SELECT AVG(nilai) AS avg_score
+        FROM (
+          SELECT nilai FROM assignments WHERE user_id = ?
+          UNION ALL
+          SELECT nilai FROM midterms WHERE user_id = ?
+          UNION ALL
+          SELECT nilai FROM finals WHERE user_id = ?
+        ) AS all_scores
+      `,
+      [req.user.id, req.user.id, req.user.id]
+    );
+
+    res.json({
+      totalStudents: studentsCount[0].count,
+      totalSubjects: subjectsCount[0].count,
+      totalGrades: gradesCount[0].count,
+      avgScore: Number(avgScoreRows[0].avg_score || 0),
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ============ ADMIN ============
+
+app.get('/api/admin/summary', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const totalTeachers = await getTeacherCount();
+    const [studentsRows] = await pool.query('SELECT COUNT(*) AS count FROM students');
+    const [subjectsRows] = await pool.query('SELECT COUNT(*) AS count FROM mata_pelajaran');
+    const allGrades = await getAllGradesForAdmin();
+
+    res.json({
+      totalTeachers,
+      totalStudents: studentsRows[0].count,
+      totalSubjects: subjectsRows[0].count,
+      totalGrades: allGrades.length,
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/admin/teachers', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const [rows] = await pool.query(`
+      SELECT id, name, email, role, created_at
+      FROM users
+      WHERE role = 'teacher'
+      ORDER BY name ASC, email ASC
+    `);
+    res.json(rows);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/admin/students', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const [rows] = await pool.query(`
+      SELECT
+        s.*,
+        s.nama AS name,
+        u.name AS teacher_name,
+        u.email AS teacher_email
+      FROM students s
+      LEFT JOIN users u ON s.user_id = u.id
+      ORDER BY s.created_at DESC
+    `);
+    res.json(rows);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/admin/grades', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const rows = await getAllGradesForAdmin();
+    res.json(rows);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ============ SERVER START ============
+
+initializeDatabase().then(() => {
+  app.listen(PORT, () => {
+    console.log(`🚀 Server running on http://localhost:${PORT}`);
+  });
+}).catch(error => {
+  console.error('Failed to start server:', error);
+  process.exit(1);
+});const express = require('express');
+const mysql = require('mysql2/promise');
+const cors = require('cors');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
+require('dotenv').config();
+
+const app = express();
+const PORT = process.env.PORT || 3001;
+const DB_NAME = process.env.DB_NAME || 'student_grade_hub';
+const JWT_SECRET = process.env.JWT_SECRET || 'student_grade_hub_secret_key_2024';
+
+app.use(cors());
+app.use(express.json());
+
+// Database connection pool
+const pool = mysql.createPool({
+  host: process.env.DB_HOST || 'localhost',
+  user: process.env.DB_USER || 'root',
+  password: process.env.DB_PASSWORD || '',
+  database: DB_NAME,
+  waitForConnections: true,
+  connectionLimit: 10,
+  queueLimit: 0
+});
+
+function buildUserPayload(user) {
+  return {
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    role: user.role || 'teacher',
+  };
+}
+
+// JWT Auth Middleware
+function authMiddleware(req, res, next) {
+  const token = req.headers.authorization?.replace('Bearer ', '');
+  if (!token) return res.status(401).json({ error: 'Unauthorized' });
+
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET);
+    req.user = decoded;
+    next();
+  } catch {
+    return res.status(401).json({ error: 'Token tidak valid' });
+  }
+}
+
+function adminOnly(req, res, next) {
+  if (req.user?.role !== 'admin') {
+    return res.status(403).json({ error: 'Akses admin diperlukan' });
+  }
+  next();
+}
+
+async function ensureColumnExists(conn, tableName, columnName, definition) {
+  const [rows] = await conn.query(
+    `
+      SELECT 1
+      FROM information_schema.COLUMNS
+      WHERE TABLE_SCHEMA = ?
+        AND TABLE_NAME = ?
+        AND COLUMN_NAME = ?
+      LIMIT 1
+    `,
+    [DB_NAME, tableName, columnName]
+  );
+
+  if (rows.length === 0) {
+    await conn.query(`ALTER TABLE \`${tableName}\` ADD COLUMN ${definition}`);
+  }
+}
+
+// Initialize database
+async function initializeDatabase() {
+  try {
+    const connection = await mysql.createConnection({
+      host: process.env.DB_HOST || 'localhost',
+      user: process.env.DB_USER || 'root',
+      password: process.env.DB_PASSWORD || ''
+    });
+    await connection.query(`CREATE DATABASE IF NOT EXISTS \`${DB_NAME}\``);
+    await connection.end();
+
+    const conn = await pool.getConnection();
+
+    await conn.query(`
+      CREATE TABLE IF NOT EXISTS users (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        name VARCHAR(100),
+        email VARCHAR(100) UNIQUE NOT NULL,
+        password VARCHAR(255) NOT NULL,
+        role ENUM('admin', 'teacher') NOT NULL DEFAULT 'teacher',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    await ensureColumnExists(
+      conn,
+      'users',
+      'role',
+      "role ENUM('admin', 'teacher') NOT NULL DEFAULT 'teacher' AFTER password"
+    );
+
+    // Students table dengan field lengkap
+    await conn.query(`
+      CREATE TABLE IF NOT EXISTS students (
+        id VARCHAR(36) PRIMARY KEY DEFAULT (UUID()),
+        user_id INT NOT NULL,
+        nis VARCHAR(50) NOT NULL,
+        nama VARCHAR(255) NOT NULL,
+        kelas VARCHAR(50) NOT NULL,
+        jenis_kelamin ENUM('L', 'P') NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+        UNIQUE KEY unique_nis_per_user (user_id, nis)
+      )
+    `);
+
+    // Mata Pelajaran table
+    await conn.query(`
+      CREATE TABLE IF NOT EXISTS mata_pelajaran (
+        id VARCHAR(36) PRIMARY KEY DEFAULT (UUID()),
+        user_id INT NOT NULL,
+        nama_mapel VARCHAR(255) NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+      )
+    `);
+
+    // Assignments (Tugas)
+    await conn.query(`
+      CREATE TABLE IF NOT EXISTS assignments (
+        id VARCHAR(36) PRIMARY KEY DEFAULT (UUID()),
+        user_id INT NOT NULL,
+        student_id VARCHAR(36) NOT NULL,
+        mapel_id VARCHAR(36) NOT NULL,
+        semester VARCHAR(50) NOT NULL,
+        nilai DECIMAL(5,2) NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+        FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE CASCADE,
+        FOREIGN KEY (mapel_id) REFERENCES mata_pelajaran(id) ON DELETE CASCADE
+      )
+    `);
+
+    // Midterms (UTS)
+    await conn.query(`
+      CREATE TABLE IF NOT EXISTS midterms (
+        id VARCHAR(36) PRIMARY KEY DEFAULT (UUID()),
+        user_id INT NOT NULL,
+        student_id VARCHAR(36) NOT NULL,
+        mapel_id VARCHAR(36) NOT NULL,
+        semester VARCHAR(50) NOT NULL,
+        nilai DECIMAL(5,2) NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+        FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE CASCADE,
+        FOREIGN KEY (mapel_id) REFERENCES mata_pelajaran(id) ON DELETE CASCADE,
+        UNIQUE KEY unique_uts (student_id, mapel_id, semester)
+      )
+    `);
+
+    // Finals (UAS)
+    await conn.query(`
+      CREATE TABLE IF NOT EXISTS finals (
+        id VARCHAR(36) PRIMARY KEY DEFAULT (UUID()),
+        user_id INT NOT NULL,
+        student_id VARCHAR(36) NOT NULL,
+        mapel_id VARCHAR(36) NOT NULL,
+        semester VARCHAR(50) NOT NULL,
+        nilai DECIMAL(5,2) NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+        FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE CASCADE,
+        FOREIGN KEY (mapel_id) REFERENCES mata_pelajaran(id) ON DELETE CASCADE,
+        UNIQUE KEY unique_uas (student_id, mapel_id, semester)
+      )
+    `);
+
+    conn.release();
+    console.log('✅ Database student_grade_hub initialized successfully');
+  } catch (error) {
+    console.error('❌ Database initialization error:', error);
+    throw error;
+  }
+}
+
+async function getTeacherCount() {
+  const [rows] = await pool.query("SELECT COUNT(*) AS count FROM users WHERE role = 'teacher'");
+  return rows[0].count;
+}
+
+async function getAllGradesForAdmin() {
+  const [rows] = await pool.query(`
+    SELECT
+      combined.id,
+      combined.user_id,
+      combined.student_id,
+      combined.mapel_id,
+      combined.semester,
+      combined.nilai AS score,
+      combined.grade_type,
+      combined.created_at,
+      s.nama AS student_name,
+      mp.nama_mapel AS subject_name,
+      u.name AS teacher_name
+    FROM (
+      SELECT id, user_id, student_id, mapel_id, semester, nilai, created_at, 'Tugas' AS grade_type
+      FROM assignments
+      UNION ALL
+      SELECT id, user_id, student_id, mapel_id, semester, nilai, created_at, 'UTS' AS grade_type
+      FROM midterms
+      UNION ALL
+      SELECT id, user_id, student_id, mapel_id, semester, nilai, created_at, 'UAS' AS grade_type
+      FROM finals
+    ) AS combined
+    LEFT JOIN students s ON combined.student_id = s.id
+    LEFT JOIN mata_pelajaran mp ON combined.mapel_id = mp.id
+    LEFT JOIN users u ON combined.user_id = u.id
+    ORDER BY combined.created_at DESC
+  `);
+
+  return rows;
+}
+
+// ============ AUTH ============
+
+app.post('/api/auth/register', async (req, res) => {
+  try {
+    const { name, email, password } = req.body;
+    if (!email || !password) return res.status(400).json({ error: 'Email dan password wajib diisi' });
+
+    const [existing] = await pool.query('SELECT id FROM users WHERE email = ?', [email]);
+    if (existing.length > 0) return res.status(400).json({ error: 'Email sudah terdaftar' });
+
+    const [adminCountRows] = await pool.query("SELECT COUNT(*) AS count FROM users WHERE role = 'admin'");
+    const role = adminCountRows[0].count === 0 ? 'admin' : 'teacher';
+    const hashedPassword = await bcrypt.hash(password, 10);
+    await pool.query(
+      'INSERT INTO users (name, email, password, role) VALUES (?, ?, ?, ?)',
+      [name || null, email, hashedPassword, role]
+    );
+
+    res.status(201).json({ message: 'Registrasi berhasil', role });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/auth/login', async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    if (!email || !password) return res.status(400).json({ error: 'Email dan password wajib diisi' });
+
+    const [rows] = await pool.query('SELECT * FROM users WHERE email = ?', [email]);
+    if (rows.length === 0) return res.status(401).json({ error: 'Email atau password salah' });
+
+    const user = rows[0];
+    const validPassword = await bcrypt.compare(password, user.password);
+    if (!validPassword) return res.status(401).json({ error: 'Email atau password salah' });
+
+    const payload = buildUserPayload(user);
+    const token = jwt.sign(payload, JWT_SECRET, { expiresIn: '7d' });
+    res.json({ token, user: payload });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/auth/profile', authMiddleware, async (req, res) => {
+  try {
+    const [rows] = await pool.query('SELECT id, name, email, role, created_at FROM users WHERE id = ?', [req.user.id]);
+    if (rows.length === 0) return res.status(404).json({ error: 'User not found' });
+    res.json(rows[0]);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ============ STUDENTS (user-scoped) - CORRECT ROUTES ============
+
+// GET /api/siswa
+app.get('/api/siswa', authMiddleware, async (req, res) => {
+  try {
+    const [rows] = await pool.query('SELECT * FROM students WHERE user_id = ? ORDER BY nama', [req.user.id]);
+    res.json(rows);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /api/siswa
+app.post('/api/siswa', authMiddleware, async (req, res) => {
+  try {
+    const { nis, nama, kelas, jenis_kelamin } = req.body;
+    if (!nis || !nama || !kelas || !jenis_kelamin) {
+      return res.status(400).json({ error: 'Semua field wajib diisi' });
+    }
+    const id = require('crypto').randomUUID();
+    await pool.query(
+      'INSERT INTO students (id, user_id, nis, nama, kelas, jenis_kelamin) VALUES (?, ?, ?, ?, ?, ?)',
+      [id, req.user.id, nis, nama, kelas, jenis_kelamin]
+    );
+    res.status(201).json({ id, user_id: req.user.id, nis, nama, kelas, jenis_kelamin });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// PUT /api/siswa/:id
+app.put('/api/siswa/:id', authMiddleware, async (req, res) => {
+  try {
+    const { nis, nama, kelas, jenis_kelamin } = req.body;
+    await pool.query(
+      'UPDATE students SET nis = ?, nama = ?, kelas = ?, jenis_kelamin = ? WHERE id = ? AND user_id = ?',
+      [nis, nama, kelas, jenis_kelamin, req.params.id, req.user.id]
+    );
+    res.json({ id: req.params.id, nis, nama, kelas, jenis_kelamin });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// DELETE /api/siswa/:id
+app.delete('/api/siswa/:id', authMiddleware, async (req, res) => {
+  try {
+    await pool.query('DELETE FROM students WHERE id = ? AND user_id = ?', [req.params.id, req.user.id]);
+    res.json({ message: 'Student deleted' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ============ MATA PELAJARAN (user-scoped) - CORRECT ROUTES ============
+
+// GET /api/mapel
+app.get('/api/mapel', authMiddleware, async (req, res) => {
+  try {
+    const [rows] = await pool.query('SELECT * FROM mata_pelajaran WHERE user_id = ? ORDER BY nama_mapel', [req.user.id]);
+    res.json(rows);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /api/mapel
+app.post('/api/mapel', authMiddleware, async (req, res) => {
+  try {
+    const { nama_mapel } = req.body;
+    if (!nama_mapel) return res.status(400).json({ error: 'Nama mata pelajaran wajib diisi' });
+    const id = require('crypto').randomUUID();
+    await pool.query(
+      'INSERT INTO mata_pelajaran (id, user_id, nama_mapel) VALUES (?, ?, ?)',
+      [id, req.user.id, nama_mapel]
+    );
+    res.status(201).json({ id, user_id: req.user.id, nama_mapel });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// PUT /api/mapel/:id
+app.put('/api/mapel/:id', authMiddleware, async (req, res) => {
+  try {
+    const { nama_mapel } = req.body;
+    await pool.query(
+      'UPDATE mata_pelajaran SET nama_mapel = ? WHERE id = ? AND user_id = ?',
+      [nama_mapel, req.params.id, req.user.id]
+    );
+    res.json({ id: req.params.id, nama_mapel });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// DELETE /api/mapel/:id
+app.delete('/api/mapel/:id', authMiddleware, async (req, res) => {
+  try {
+    await pool.query('DELETE FROM mata_pelajaran WHERE id = ? AND user_id = ?', [req.params.id, req.user.id]);
+    res.json({ message: 'Subject deleted' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ============ NILAI (user-scoped) - TUGAS/UTS/UAS ROUTES ============
+async function getUserGradeRows(tableName, userId, gradeType) {
+  const [rows] = await pool.query(
+    `
+      SELECT
+        g.*,
+        s.nama AS student_name,
+        mp.nama_mapel AS subject_name,
+        ? AS grade_type
+      FROM ${tableName} g
+      LEFT JOIN students s ON g.student_id = s.id
+      LEFT JOIN mata_pelajaran mp ON g.mapel_id = mp.id
+      WHERE g.user_id = ?
+      ORDER BY g.created_at DESC
+    `,
+    [gradeType, userId]
+  );
+
+  return rows;
+}
+
+function registerGradeRoutes(basePath, tableName, gradeType) {
+  app.get(basePath, authMiddleware, async (req, res) => {
+    try {
+      const rows = await getUserGradeRows(tableName, req.user.id, gradeType);
+      res.json(rows);
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post(basePath, authMiddleware, async (req, res) => {
+    try {
+      const { student_id, mapel_id, semester, nilai } = req.body;
+      if (!student_id || !mapel_id || !semester || nilai === undefined) {
+        return res.status(400).json({ error: 'Semua field wajib diisi' });
+      }
+
+      const id = crypto.randomUUID();
+      await pool.query(
+        `INSERT INTO ${tableName} (id, user_id, student_id, mapel_id, semester, nilai) VALUES (?, ?, ?, ?, ?, ?)`,
+        [id, req.user.id, student_id, mapel_id, semester, nilai]
+      );
+
+      res.status(201).json({ id, user_id: req.user.id, student_id, mapel_id, semester, nilai });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.put(`${basePath}/:id`, authMiddleware, async (req, res) => {
+    try {
+      const { student_id, mapel_id, semester, nilai } = req.body;
+      await pool.query(
+        `UPDATE ${tableName} SET student_id = ?, mapel_id = ?, semester = ?, nilai = ? WHERE id = ? AND user_id = ?`,
+        [student_id, mapel_id, semester, nilai, req.params.id, req.user.id]
+      );
+
+      res.json({ id: req.params.id, student_id, mapel_id, semester, nilai });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.delete(`${basePath}/:id`, authMiddleware, async (req, res) => {
+    try {
+      await pool.query(`DELETE FROM ${tableName} WHERE id = ? AND user_id = ?`, [req.params.id, req.user.id]);
+      res.json({ message: 'Grade deleted' });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+}
+
+registerGradeRoutes('/api/nilai/tugas', 'assignments', 'Tugas');
+registerGradeRoutes('/api/nilai/uts', 'midterms', 'UTS');
+registerGradeRoutes('/api/nilai/uas', 'finals', 'UAS');
+
+// ============ DASHBOARD ============
+
+app.get('/api/dashboard/stats', authMiddleware, async (req, res) => {
+  try {
+    const [studentsCount] = await pool.query('SELECT COUNT(*) AS count FROM students WHERE user_id = ?', [req.user.id]);
+    const [subjectsCount] = await pool.query('SELECT COUNT(*) AS count FROM mata_pelajaran WHERE user_id = ?', [req.user.id]);
+    const [gradesCount] = await pool.query(
+      `
+        SELECT (
+          (SELECT COUNT(*) FROM assignments WHERE user_id = ?) +
+          (SELECT COUNT(*) FROM midterms WHERE user_id = ?) +
+          (SELECT COUNT(*) FROM finals WHERE user_id = ?)
+        ) AS count
+      `,
+      [req.user.id, req.user.id, req.user.id]
+    );
+    const [avgScoreRows] = await pool.query(
+      `
+        SELECT AVG(nilai) AS avg_score
+        FROM (
+          SELECT nilai FROM assignments WHERE user_id = ?
+          UNION ALL
+          SELECT nilai FROM midterms WHERE user_id = ?
+          UNION ALL
+          SELECT nilai FROM finals WHERE user_id = ?
+        ) AS all_scores
+      `,
+      [req.user.id, req.user.id, req.user.id]
+    );
+    const grades = await getAllGradesForAdmin();
+    const userGrades = grades.filter((grade) => grade.user_id === req.user.id);
+
+    res.json({
+      totalStudents: studentsCount[0].count,
+      totalSubjects: subjectsCount[0].count,
+      totalGrades: gradesCount[0].count,
+      avgScore: Number(avgScoreRows[0].avg_score || 0),
+      grades: userGrades
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ============ ADMIN ============
+
+app.get('/api/admin/summary', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const totalTeachers = await getTeacherCount();
+    const [studentsRows] = await pool.query('SELECT COUNT(*) AS count FROM students');
+    const [subjectsRows] = await pool.query('SELECT COUNT(*) AS count FROM mata_pelajaran');
+    const allGrades = await getAllGradesForAdmin();
+
+    res.json({
+      totalTeachers,
+      totalStudents: studentsRows[0].count,
+      totalSubjects: subjectsRows[0].count,
+      totalGrades: allGrades.length,
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/admin/teachers', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const [rows] = await pool.query(`
+      SELECT id, name, email, role, created_at
+      FROM users
+      WHERE role = 'teacher'
+      ORDER BY name ASC, email ASC
+    `);
+    res.json(rows);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/admin/students', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const [rows] = await pool.query(`
+      SELECT
+        s.*,
+        s.nama AS name,
+        u.name AS teacher_name,
+        u.email AS teacher_email
+      FROM students s
+      LEFT JOIN users u ON s.user_id = u.id
+      ORDER BY s.created_at DESC
+    `);
+    res.json(rows);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/admin/grades', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const rows = await getAllGradesForAdmin();
+    res.json(rows);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ============ SERVER START ============
+
+initializeDatabase().then(() => {
+  app.listen(PORT, () => {
+    console.log(`🚀 Server running on http://localhost:${PORT}`);
+  });
+}).catch(error => {
+  console.error('Failed to start server:', error);
+  process.exit(1);
+
+    res.json({
+      totalTeachers,
+      totalStudents: studentsRows[0].count,
+      totalSubjects: subjectsRows[0].count,
+      totalGrades: allGrades.length,
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/admin/teachers', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const [rows] = await pool.query(`
+      SELECT id, name, email, role, created_at
+      FROM users
+      WHERE role = 'teacher'
+      ORDER BY name ASC, email ASC
+    `);
+    res.json(rows);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/admin/students', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const [rows] = await pool.query(`
+      SELECT
+        s.*,
+        s.nama AS name,
+        u.name AS teacher_name,
+        u.email AS teacher_email
+      FROM students s
+      LEFT JOIN users u ON s.user_id = u.id
+      ORDER BY s.created_at DESC
+    `);
+    res.json(rows);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/admin/grades', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const rows = await getAllGradesForAdmin();
+    res.json(rows);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

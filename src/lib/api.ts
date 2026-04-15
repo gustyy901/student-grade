@@ -26,9 +26,9 @@ async function fetchAPI(endpoint: string, options: RequestInit = {}) {
 // Students API
 export const studentsAPI = {
   getAll: () => fetchAPI('/siswa'),
-  create: (data: { nis: string; nama: string; kelas: string; jenis_kelamin: string }) =>
+  create: (data: any) =>
     fetchAPI('/siswa', { method: 'POST', body: JSON.stringify(data) }),
-  update: (id: string, data: { nis: string; nama: string; kelas: string; jenis_kelamin: string }) =>
+  update: (id: string, data: any) =>
     fetchAPI(`/siswa/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   delete: (id: string) => fetchAPI(`/siswa/${id}`, { method: 'DELETE' }),
 };
@@ -36,49 +36,44 @@ export const studentsAPI = {
 // Subjects API
 export const subjectsAPI = {
   getAll: () => fetchAPI('/mapel'),
-  create: (data: { nama_mapel: string }) =>
+  create: (data: any) =>
     fetchAPI('/mapel', { method: 'POST', body: JSON.stringify(data) }),
-  update: (id: string, data: { nama_mapel: string }) =>
+  update: (id: string, data: any) =>
     fetchAPI(`/mapel/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   delete: (id: string) => fetchAPI(`/mapel/${id}`, { method: 'DELETE' }),
 };
 
-// Grades API - Assignment (Tugas)
+// Grades API - with separate endpoints for Tugas/UTS/UAS
 export const gradesAPI = {
-  // Get all tugas
+  getAll: async () => {
+    const [tugas, uts, uas] = await Promise.all([
+      fetchAPI('/nilai/tugas'),
+      fetchAPI('/nilai/uts'),
+      fetchAPI('/nilai/uas'),
+    ]);
+    return [...tugas, ...uts, ...uas];
+  },
   getAllTugas: () => fetchAPI('/nilai/tugas'),
-  createTugas: (data: { student_id: string; mapel_id: string; semester: string; nilai: number }) =>
-    fetchAPI('/nilai/tugas', { method: 'POST', body: JSON.stringify(data) }),
-  updateTugas: (id: string, data: { student_id: string; mapel_id: string; semester: string; nilai: number }) =>
-    fetchAPI(`/nilai/tugas/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
-  deleteTugas: (id: string) => fetchAPI(`/nilai/tugas/${id}`, { method: 'DELETE' }),
-
-  // Get all UTS (Midterm)
   getAllUts: () => fetchAPI('/nilai/uts'),
-  createUts: (data: { student_id: string; mapel_id: string; semester: string; nilai: number }) =>
-    fetchAPI('/nilai/uts', { method: 'POST', body: JSON.stringify(data) }),
-  updateUts: (id: string, data: { student_id: string; mapel_id: string; semester: string; nilai: number }) =>
-    fetchAPI(`/nilai/uts/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
-  deleteUts: (id: string) => fetchAPI(`/nilai/uts/${id}`, { method: 'DELETE' }),
-
-  // Get all UAS (Final)
   getAllUas: () => fetchAPI('/nilai/uas'),
-  createUas: (data: { student_id: string; mapel_id: string; semester: string; nilai: number }) =>
-    fetchAPI('/nilai/uas', { method: 'POST', body: JSON.stringify(data) }),
-  updateUas: (id: string, data: { student_id: string; mapel_id: string; semester: string; nilai: number }) =>
-    fetchAPI(`/nilai/uas/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
-  deleteUas: (id: string) => fetchAPI(`/nilai/uas/${id}`, { method: 'DELETE' }),
-
-  // Get detail nilai
-  getDetail: () => fetchAPI('/nilai/detail'),
   
-  // Legacy fallback (for compatibility)
-  getAll: () => fetchAPI('/nilai/tugas'),
-  create: (data: { student_id: string; mapel_id: string; semester: string; nilai: number }) =>
+  createTugas: (data: any) =>
     fetchAPI('/nilai/tugas', { method: 'POST', body: JSON.stringify(data) }),
-  update: (id: string, data: { student_id: string; mapel_id: string; semester: string; nilai: number }) =>
+  createUts: (data: any) =>
+    fetchAPI('/nilai/uts', { method: 'POST', body: JSON.stringify(data) }),
+  createUas: (data: any) =>
+    fetchAPI('/nilai/uas', { method: 'POST', body: JSON.stringify(data) }),
+  
+  updateTugas: (id: string, data: any) =>
     fetchAPI(`/nilai/tugas/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
-  delete: (id: string) => fetchAPI(`/nilai/tugas/${id}`, { method: 'DELETE' }),
+  updateUts: (id: string, data: any) =>
+    fetchAPI(`/nilai/uts/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  updateUas: (id: string, data: any) =>
+    fetchAPI(`/nilai/uas/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  
+  deleteTugas: (id: string) => fetchAPI(`/nilai/tugas/${id}`, { method: 'DELETE' }),
+  deleteUts: (id: string) => fetchAPI(`/nilai/uts/${id}`, { method: 'DELETE' }),
+  deleteUas: (id: string) => fetchAPI(`/nilai/uas/${id}`, { method: 'DELETE' }),
 };
 
 // Dashboard API
@@ -88,6 +83,19 @@ export const dashboardAPI = {
 
 // Admin API
 export const adminAPI = {
-  getTeachers: () => fetchAPI('/admin/teachers'),
   getSummary: () => fetchAPI('/admin/summary'),
+  getTeachers: () => fetchAPI('/admin/teachers'),
+  getStudents: () => fetchAPI('/admin/students'),
+  getGrades: () => fetchAPI('/admin/grades'),
+};
+
+// Auth API
+export const authAPI = {
+  register: (data: any) =>
+    fetchAPI('/auth/register', { method: 'POST', body: JSON.stringify(data) }),
+  login: (data: any) =>
+    fetchAPI('/auth/login', { method: 'POST', body: JSON.stringify(data) }),
+  logout: () =>
+    fetchAPI('/auth/logout', { method: 'POST' }),
+  getProfile: () => fetchAPI('/auth/profile'),
 };
