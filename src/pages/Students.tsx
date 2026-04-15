@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { studentsAPI } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -7,7 +7,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Plus, Pencil, Trash2, Users } from "lucide-react";
+import { Plus, Pencil, Trash2, Users, Search } from "lucide-react";
 import { toast } from "sonner";
 
 export default function Students() {
@@ -18,11 +18,25 @@ export default function Students() {
   const [nama, setNama] = useState("");
   const [kelas, setKelas] = useState("");
   const [jenis_kelamin, setJenis_kelamin] = useState("Laki-laki");
+  const [searchQuery, setSearchQuery] = useState("");
 
   const { data: students, isLoading } = useQuery({
     queryKey: ["students"],
     queryFn: studentsAPI.getAll,
   });
+
+  // Filter students based on search query
+  const filteredStudents = useMemo(() => {
+    if (!students) return [];
+    const query = searchQuery.toLowerCase().trim();
+    if (!query) return students;
+    
+    return students.filter((student: any) =>
+      student.nama.toLowerCase().includes(query) ||
+      student.nis.toLowerCase().includes(query) ||
+      student.kelas.toLowerCase().includes(query)
+    );
+  }, [students, searchQuery]);
 
   const addMutation = useMutation({
     mutationFn: studentsAPI.create,
@@ -165,13 +179,26 @@ export default function Students() {
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-base md:text-lg">Daftar Siswa</CardTitle>
-          <CardDescription className="text-xs md:text-sm">Total {students?.length || 0} siswa terdaftar</CardDescription>
+          <div className="flex flex-col gap-4">
+            <div>
+              <CardTitle className="text-base md:text-lg">Daftar Siswa</CardTitle>
+              <CardDescription className="text-xs md:text-sm">Total {filteredStudents?.length || 0} dari {students?.length || 0} siswa</CardDescription>
+            </div>
+            <div className="relative">
+              <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Cari berdasarkan nama, NIS, atau kelas..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-10"
+              />
+            </div>
+          </div>
         </CardHeader>
         <CardContent className="overflow-x-auto">
           {isLoading ? (
             <p className="text-center py-8 text-muted-foreground">Memuat data...</p>
-          ) : students && students.length > 0 ? (
+          ) : filteredStudents && filteredStudents.length > 0 ? (
             <Table>
               <TableHeader>
                 <TableRow>
@@ -184,7 +211,7 @@ export default function Students() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {students.map((student: any, index: number) => (
+                {filteredStudents.map((student: any, index: number) => (
                   <TableRow key={student.id}>
                     <TableCell className="text-xs md:text-sm">{index + 1}</TableCell>
                     <TableCell className="text-xs md:text-sm">{student.nis}</TableCell>
@@ -206,6 +233,12 @@ export default function Students() {
                 ))}
               </TableBody>
             </Table>
+          ) : searchQuery ? (
+            <div className="text-center py-12 text-muted-foreground">
+              <Users className="h-12 w-12 mx-auto mb-4 opacity-50" />
+              <p className="text-lg font-medium">Tidak ada hasil pencarian</p>
+              <p className="text-sm mt-1">Coba ubah kata kunci pencarian Anda.</p>
+            </div>
           ) : (
             <div className="text-center py-12 text-muted-foreground">
               <Users className="h-12 w-12 mx-auto mb-4 opacity-50" />

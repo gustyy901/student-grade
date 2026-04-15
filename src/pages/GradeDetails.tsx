@@ -5,7 +5,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { FileText, GraduationCap } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { FileText, GraduationCap, Search } from "lucide-react";
 
 const WEIGHTS = {
   tugas: 0.25, // 25%
@@ -15,6 +16,7 @@ const WEIGHTS = {
 
 export default function GradeDetails() {
   const [detailView, setDetailView] = useState<"summary" | "tugas" | "uts" | "uas">("summary");
+  const [searchQuery, setSearchQuery] = useState("");
   
   const { data: students, isLoading: isLoadingStudents } = useQuery({ queryKey: ["students"], queryFn: studentsAPI.getAll });
   const { data: subjects, isLoading: isLoadingSubjects } = useQuery({ queryKey: ["subjects"], queryFn: subjectsAPI.getAll });
@@ -76,6 +78,17 @@ export default function GradeDetails() {
     });
   }, [students, gradesTugas, gradesUts, gradesUas]);
 
+  // Filter student grades based on search query
+  const filteredStudentGrades = useMemo(() => {
+    const query = searchQuery.toLowerCase().trim();
+    if (!query) return studentGrades;
+    
+    return studentGrades.filter((student: any) =>
+      student.nama.toLowerCase().includes(query) ||
+      student.kelas.toLowerCase().includes(query)
+    );
+  }, [studentGrades, searchQuery]);
+
   const getGradeBadge = (score: number): "default" | "secondary" | "outline" | "destructive" => {
     if (score >= 90) return "default";
     if (score >= 80) return "secondary";
@@ -99,6 +112,17 @@ export default function GradeDetails() {
           Detail Nilai Siswa
         </h2>
         <p className="text-sm md:text-base text-muted-foreground">Ringkasan nilai per siswa dengan weighted average</p>
+        
+        {/* Search Bar */}
+        <div className="relative mt-4 mb-4">
+          <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+          <Input
+            placeholder="Cari berdasarkan nama atau kelas..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="pl-10"
+          />
+        </div>
         
         {/* View tabs */}
         <div className="flex gap-2 mt-4 flex-wrap">
@@ -139,17 +163,17 @@ export default function GradeDetails() {
             <p>Memuat data...</p>
           </CardContent>
         </Card>
-      ) : studentGrades.length === 0 ? (
+      ) : filteredStudentGrades.length === 0 ? (
         <Card>
           <CardContent className="text-center py-12 text-muted-foreground">
             <GraduationCap className="h-12 w-12 mx-auto mb-4 opacity-50" />
-            <p className="text-lg font-medium">Belum ada data</p>
-            <p className="text-sm mt-1">Tambahkan siswa dan nilai terlebih dahulu.</p>
+            <p className="text-lg font-medium">{searchQuery ? "Tidak ada hasil pencarian" : "Belum ada data"}</p>
+            <p className="text-sm mt-1">{searchQuery ? "Coba ubah kata kunci pencarian Anda." : "Tambahkan siswa dan nilai terlebih dahulu."}</p>
           </CardContent>
         </Card>
       ) : detailView === "summary" ? (
         /* SUMMARY VIEW */
-        studentGrades.map((student: any) => (
+        filteredStudentGrades.map((student: any) => (
           <Card key={student.id}>
             <CardHeader>
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
@@ -196,7 +220,7 @@ export default function GradeDetails() {
         ))
       ) : (
         /* DETAIL VIEW (TUGAS/UTS/UAS) */
-        studentGrades.map((student: any) => {
+        filteredStudentGrades.map((student: any) => {
           const gradesList = detailView === "tugas" ? student.allGrades.tugas : 
                             detailView === "uts" ? student.allGrades.uts : 
                             student.allGrades.uas;
